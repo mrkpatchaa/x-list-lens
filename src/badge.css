@@ -1,0 +1,36 @@
+/* Injected via the manifest so it lands in the extension's own stylesheet origin
+   rather than depending on the page allowing inline styles. */
+.listlens-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  background: rgba(29, 155, 240, 0.15);
+  color: rgb(29, 155, 240);
+  padding: 0 4px;
+  border-radius: 4px;
+  margin-left: 6px;
+  cursor: default;
+  line-height: 1;
+  height: 16px;
+  font-weight: bold;
+}
+
+/* Instant, styled replacement for the native title tooltip, which takes ~1.5s to
+   appear and can't be read while scrolling a timeline. */
+.listlens-tip {
+  position: fixed;
+  z-index: 2147483647;
+  max-width: 260px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgb(21, 32, 43);
+  color: rgb(231, 233, 234);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 400;
+  pointer-events: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

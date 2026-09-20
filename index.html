@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link href="./src/index.css" rel="stylesheet">
+  <title>ListLens</title>
+</head>
+<body class="w-72 bg-slate-900 text-white p-4 font-sans">
+  <div class="flex flex-col gap-3">
+    <div class="flex items-center justify-between">
+      <h1 class="text-lg font-bold text-blue-400">ListLens</h1>
+      <span id="statusBadge" role="status" aria-live="polite" class="px-2 py-1 text-xs bg-slate-800 rounded-full">Idle</span>
+    </div>
+
+    <!-- Shown until the GraphQL query IDs have been harvested; without them a sync
+         can only fail, so we guide instead of letting the user hit an error. -->
+    <div id="setupNotice" class="hidden bg-amber-950/60 border border-amber-800/60 p-3 rounded-lg flex flex-col gap-2">
+      <p class="text-sm font-semibold text-amber-300">One-time setup</p>
+      <p class="text-xs text-amber-100/80">ListLens needs to watch X load your Lists once before it can sync.</p>
+      <button id="openListsBtn" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold py-1.5 px-3 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300">
+        Open my Lists on X
+      </button>
+    </div>
+
+    <div class="bg-slate-800 p-3 rounded-lg border border-slate-700">
+      <p class="text-2xl font-bold leading-tight"><span id="peopleCount">0</span> <span id="peopleWord" class="text-base font-normal text-slate-400">people</span></p>
+      <p id="listCount" class="text-sm text-slate-400">across 0 lists</p>
+      <p id="lastSync" class="text-xs text-slate-500 mt-1">Never synced</p>
+    </div>
+
+    <div id="progressWrap" class="hidden flex-col gap-1">
+      <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full w-0 bg-blue-500 transition-all duration-300"></div>
+      </div>
+      <p id="progressLabel" class="text-xs text-slate-400 truncate">&nbsp;</p>
+    </div>
+
+    <div class="flex gap-2">
+      <button id="syncBtn" class="flex-1 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
+        Sync Lists Now
+      </button>
+      <button id="cancelBtn" class="hidden bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold py-2 px-3 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400">
+        Stop
+      </button>
+    </div>
+
+    <p id="hintMsg" class="text-xs text-slate-500 hidden"></p>
+    <p id="errorMsg" role="alert" class="text-xs text-red-400 hidden"></p>
+  </div>
+  <script type="module" src="/src/popup.ts"></script>
+</body>
+</html>
