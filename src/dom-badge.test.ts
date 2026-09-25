@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BADGE_TARGET_SELECTOR, findHandle, formatListNames } from './dom-badge'
+import { BADGE_TARGET_SELECTOR, findHandle, formatListNames, getProfileHandleFromPath } from './dom-badge'
 
 describe('badge target selection', () => {
     it('includes the profile header used above the feed', () => {
@@ -29,6 +29,14 @@ describe('findHandle', () => {
     it('rejects an unlinked handle until the profile link is rendered', () => {
         document.body.innerHTML = '<div data-testid="UserName"><span>@alice</span></div>'
         expect(findHandle(document.querySelector('[data-testid="UserName"]') as HTMLElement)).toBeNull()
+    })
+
+    it('uses the profile route when the header handle is not yet linked', () => {
+        document.body.innerHTML = '<div data-testid="UserProfileHeader_Items"><span>@thecodinglove</span></div>'
+        const header = document.querySelector('[data-testid="UserProfileHeader_Items"]') as HTMLElement
+
+        expect(getProfileHandleFromPath('/thecodinglove')).toBe('thecodinglove')
+        expect(findHandle(header, getProfileHandleFromPath('/thecodinglove'))).toMatchObject({ handle: 'thecodinglove' })
     })
 
     it('rejects a linked route that is not a profile handle', () => {

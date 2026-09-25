@@ -1,5 +1,11 @@
 import './badge.css';
-import { BADGE_TARGET_SELECTOR, findHandle, formatListNames } from './dom-badge';
+import {
+    BADGE_TARGET_SELECTOR,
+    PROFILE_HEADER_SELECTOR,
+    findHandle,
+    formatListNames,
+    getProfileHandleFromPath,
+} from './dom-badge';
 import {
     MSG,
     getLocal,
@@ -22,6 +28,12 @@ const NAMES_ATTR = 'data-listlens-names';
 const MAX_ROOTS_PER_FRAME = 40;
 const MAX_PAINT_ATTEMPTS = 10;
 const TIP_ID = 'listlens-tip';
+const profileHandle = getProfileHandleFromPath(window.location.pathname);
+
+function findHandleForNode(node: HTMLElement) {
+    const fallback = node.matches(PROFILE_HEADER_SELECTOR) ? profileHandle : undefined;
+    return findHandle(node, fallback);
+}
 
 console.info('[ListLens:Content] Content script loaded.');
 
@@ -106,8 +118,8 @@ function createBadgeIcon() {
 
 // Idempotent: safe to call again when a handle's lists change.
 function paint(node: HTMLElement): boolean {
-    const found = findHandle(node);
-    const parent = found?.link.parentElement;
+    const found = findHandleForNode(node);
+    const parent = found?.link?.parentElement || found?.span.parentElement;
     if (!found || !parent) {
         for (const stale of Array.from(node.querySelectorAll<HTMLElement>(`.${BADGE_CLASS}`))) {
             if (stale.parentElement) removeBadges(stale.parentElement);
@@ -322,7 +334,7 @@ const mutationObserver = new MutationObserver((records) => {
         const host = target?.closest(TARGET_SELECTOR) || null;
         if (host) {
             const knownHandle = host.getAttribute(HANDLE_ATTR) || '';
-            const currentHandle = findHandle(host as HTMLElement)?.handle || '';
+            const currentHandle = findHandleForNode(host as HTMLElement)?.handle || '';
             if (currentHandle !== knownHandle && !observed.has(host)) {
                 observer.unobserve(host);
                 observed.delete(host);
