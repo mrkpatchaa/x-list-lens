@@ -10,7 +10,7 @@ import {
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
 import { getUserIdFromTwid } from './list-filter';
-import { parseOwnedListsPage, type OwnedListSummary } from './list-ownership';
+import { buildListOwnershipsVariables, parseOwnedListsPage, type OwnedListSummary } from './list-ownership';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -211,11 +211,7 @@ async function fetchOwnedLists(
     let cursor = '';
 
     while (true) {
-        const variables = JSON.stringify({
-            userId: currentUserId,
-            count: PAGE_SIZE,
-            ...(cursor ? { cursor } : {}),
-        });
+        const variables = buildListOwnershipsVariables(currentUserId, PAGE_SIZE, cursor);
         const url = `https://x.com/i/api/graphql/${ownershipsQueryId}/ListOwnerships?variables=${encodeURIComponent(variables)}`;
         const page = parseOwnedListsPage(await fetchWithAuth(url, csrfToken), currentUserId);
 

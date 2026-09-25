@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseOwnedListsPage } from './list-ownership'
+import { buildListOwnershipsVariables, parseOwnedListsPage } from './list-ownership'
 
 const listRecord = (id: string, name: string, ownerId = '42') => ({
     id_str: id,
@@ -20,6 +20,19 @@ const ownershipPayload = (results: unknown[], cursor = '') => ({
             },
         },
     },
+})
+
+describe('ListOwnerships request', () => {
+    it('includes both ownership variables used by X and the requested cursor', () => {
+        expect(JSON.parse(buildListOwnershipsVariables('42', 100))).toEqual({
+            userId: '42',
+            isListMemberTargetUserId: '42',
+            count: 100,
+        })
+        expect(JSON.parse(buildListOwnershipsVariables('42', 100, 'NEXT_PAGE'))).toMatchObject({
+            cursor: 'NEXT_PAGE',
+        })
+    })
 })
 
 describe('parseOwnedListsPage', () => {

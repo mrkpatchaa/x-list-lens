@@ -8,6 +8,19 @@ type JsonRecord = Record<string, unknown>
 const MAX_TRAVERSAL_NODES = 50_000
 const LIST_ID_RE = /^\d{1,32}$/
 
+export function buildListOwnershipsVariables(
+    userId: string,
+    count: number,
+    cursor?: string,
+): string {
+    return JSON.stringify({
+        userId,
+        isListMemberTargetUserId: userId,
+        count,
+        ...(cursor ? { cursor } : {}),
+    })
+}
+
 function isRecord(value: unknown): value is JsonRecord {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
