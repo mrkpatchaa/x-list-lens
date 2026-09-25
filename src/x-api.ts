@@ -92,9 +92,10 @@ function findTimelineInstructions(data: JsonRecord): unknown[] | undefined {
     }
 
     let visited = 0;
+    let queueIndex = 0;
     const queue: Array<{ value: unknown; depth: number }> = [{ value: data, depth: 0 }];
-    while (queue.length > 0 && visited < MAX_TRAVERSAL_NODES) {
-        const current = queue.shift()!;
+    while (queueIndex < queue.length && visited < MAX_TRAVERSAL_NODES) {
+        const current = queue[queueIndex++];
         visited++;
         if (!isRecord(current.value) || current.depth > 12) continue;
         if (Array.isArray(current.value.instructions)) return current.value.instructions;
