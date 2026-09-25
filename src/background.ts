@@ -243,13 +243,16 @@ async function syncSingleList(listId: string): Promise<boolean> {
 
 let dirtySyncTimer: ReturnType<typeof setTimeout> | undefined;
 let dirtyProcessorRunning = false;
+let dirtyProcessorPromise: Promise<void> | undefined;
+let dirtyRevision = 0;
 let dirtyWrites: Promise<void> = Promise.resolve();
+let fullSyncStarting = false;
 let fullSyncRunning = false;
 
 type DirtyListIds = Record<string, number>;
 
 function scheduleDirtySync(delayMs = MUTATION_DEBOUNCE_MS): void {
-    if (fullSyncRunning || dirtySyncTimer) return;
+    if (fullSyncRunning || fullSyncStarting || dirtySyncTimer) return;
     dirtySyncTimer = setTimeout(() => {
         dirtySyncTimer = undefined;
         void processDirtySyncs();
@@ -258,6 +261,7 @@ function scheduleDirtySync(delayMs = MUTATION_DEBOUNCE_MS): void {
 
 function queueListSync(listId: string): void {
     if (!isValidListId(listId)) return;
+    dirtyRevision++;
     const queuedAt = Date.now();
     const nextWrite = dirtyWrites.then(async () => {
         const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
@@ -285,26 +289,35 @@ async function removeDirtyListIfUnchanged(listId: string, queuedAt: number): Pro
     await nextWrite;
 }
 
-async function processDirtySyncs(): Promise<void> {
-    if (dirtyProcessorRunning || fullSyncRunning) return;
+function processDirtySyncs(): Promise<void> {
+    if (dirtyProcessorRunning) return dirtyProcessorPromise || Promise.resolve();
+    if (fullSyncRunning) return Promise.resolve();
+
     dirtyProcessorRunning = true;
+    const revisionAtStart = dirtyRevision;
+    dirtyProcessorPromise = (async () => {
+        try {
+            const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
+            const dirtyLists = Object.entries((dirtyListIds || {}) as DirtyListIds)
+                .filter(([listId, queuedAt]) => isValidListId(listId) && typeof queuedAt === 'number')
+                .sort(([, a], [, b]) => a - b);
 
-    try {
-        const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
-        const dirtyLists = Object.entries((dirtyListIds || {}) as DirtyListIds)
-            .filter(([listId, queuedAt]) => isValidListId(listId) && typeof queuedAt === 'number')
-            .sort(([, a], [, b]) => a - b);
-
-        for (const [listId, queuedAt] of dirtyLists) {
-            if (fullSyncRunning) break;
-            const refreshed = await syncSingleList(listId);
-            if (refreshed) await removeDirtyListIfUnchanged(listId, queuedAt);
+            for (const [listId, queuedAt] of dirtyLists) {
+                if (fullSyncRunning) break;
+                const refreshed = await syncSingleList(listId);
+                if (refreshed) await removeDirtyListIfUnchanged(listId, queuedAt);
+            }
+        } catch (error) {
+            console.error('[ListLens:Background] Could not process changed lists', error);
+        } finally {
+            dirtyProcessorRunning = false;
+            dirtyProcessorPromise = undefined;
+            if (!fullSyncRunning && !fullSyncStarting && dirtyRevision !== revisionAtStart) {
+                scheduleDirtySync(0);
+            }
         }
-    } catch (error) {
-        console.error('[ListLens:Background] Could not process changed lists', error);
-    } finally {
-        dirtyProcessorRunning = false;
-    }
+    })();
+    return dirtyProcessorPromise;
 }
 
 async function isCurrentRunCancelled(runId: string): Promise<boolean> {
@@ -331,12 +344,21 @@ async function commitFullSync(
 }
 
 async function syncLists(): Promise<void> {
-    if (fullSyncRunning) return;
-    fullSyncRunning = true;
+    if (fullSyncRunning || fullSyncStarting) return;
+    fullSyncStarting = true;
     const runId = crypto.randomUUID();
 
     try {
         await setSyncState({ status: 'running', runId, done: 0, total: 0 });
+        // Finish any already-queued targeted work before taking a full snapshot.
+        // This prevents a full commit from overwriting a newer targeted result.
+        await processDirtySyncs();
+        if (await isCurrentRunCancelled(runId)) {
+            await setSyncState({ status: 'cancelled', at: Date.now() });
+            return;
+        }
+        fullSyncRunning = true;
+
         const csrfToken = await getCsrfToken();
         const listsQueryId = await getDynamicQueryId('ListsManagementPageTimeline');
         const membersQueryId = await getDynamicQueryId('ListMembers');
@@ -380,6 +402,7 @@ async function syncLists(): Promise<void> {
         await setSyncState(createErrorState(error));
     } finally {
         fullSyncRunning = false;
+        fullSyncStarting = false;
         scheduleDirtySync(0);
     }
 }

@@ -167,23 +167,30 @@ export function parseMembersPage(payload: unknown): { handles: string[]; cursor:
     return { handles: [...handles], cursor }
 }
 
-function collectLists(value: unknown, into: Map<string, ListSummary>, visited = { count: 0 }): void {
-    if (visited.count++ >= MAX_TRAVERSAL_NODES) return;
-    if (Array.isArray(value)) {
-        for (const item of value) collectLists(item, into, visited);
-        return;
-    }
-    if (!isRecord(value)) return;
-
+function readListRecord(value: unknown): ListSummary | undefined {
+    if (!isRecord(value)) return undefined;
     const id = getString(value.id_str);
     const name = getString(value.name);
-    if (id && name && isValidListId(id) && name.length <= 200) {
-        into.set(id, { id, name });
+    const hasListShape = value.member_count !== undefined || value.mode !== undefined;
+    if (!id || !name || !hasListShape || !isValidListId(id) || name.length > 200) return undefined;
+    return { id, name };
+}
+
+function collectListsFromEntry(entry: JsonRecord, into: Map<string, ListSummary>): void {
+    const itemContent = readPath(entry, ['content', 'itemContent']);
+    if (!isRecord(itemContent)) return;
+
+    // Only these list-specific result paths are accepted. Recursing through the
+    // whole entry would mistake embedded owners and users for lists.
+    for (const key of ['list_results', 'list_result']) {
+        const resultContainer = itemContent[key];
+        if (!isRecord(resultContainer)) continue;
+        const record = readListRecord(resultContainer.result);
+        if (record) into.set(record.id, record);
     }
 
-    for (const child of Object.values(value)) {
-        if (isRecord(child) || Array.isArray(child)) collectLists(child, into, visited);
-    }
+    const directList = readListRecord(itemContent.list);
+    if (directList) into.set(directList.id, directList);
 }
 
 export function parseListsPage(payload: unknown): { lists: ListSummary[]; cursor: string } {
@@ -198,7 +205,7 @@ export function parseListsPage(payload: unknown): { lists: ListSummary[]; cursor
     for (const entry of timelineEntries(instructions)) {
         const entryCursor = readCursor(entry);
         if (entryCursor) cursor = entryCursor;
-        collectLists(entry, lists);
+        collectListsFromEntry(entry, lists);
     }
 
     return { lists: [...lists.values()], cursor }

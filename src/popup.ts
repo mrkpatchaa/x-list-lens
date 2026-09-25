@@ -104,9 +104,9 @@ function renderSetup(queryIds: QueryIds) {
     setupEyebrow.textContent = missing.length === 2 ? 'One-time setup' : 'Almost there';
     setupTitle.textContent = needsListMembers ? 'Open one of your lists' : 'Connect to your Lists';
     setupCopy.textContent = needsListMembers
-        ? 'ListLens needs to see one list page before it can read memberships.'
+        ? 'Open any list from your Lists page so ListLens can learn the member request.'
         : 'Open your Lists on X once so ListLens can learn the current request format.';
-    openListsBtn.textContent = needsListMembers ? 'Open a list on X' : 'Open Lists on X';
+    openListsBtn.textContent = 'Open Lists on X';
 
     setupListsStep.className = needsLists
         ? 'setup-step setup-step-pending'

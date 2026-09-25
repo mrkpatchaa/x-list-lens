@@ -100,6 +100,20 @@ describe('parseListsPage', () => {
         expect(page.cursor).toBe('NEXT_LISTS')
     })
 
+    it('ignores embedded owners that are not list results', () => {
+        const page = parseListsPage(listPayload([{
+            entryId: 'list-1',
+            content: {
+                itemContent: {
+                    list_results: { result: listRecord('1', 'Design') },
+                    user: { id_str: '999', name: 'Owner', screen_name: 'owner', member_count: 2, mode: 'Public' },
+                },
+            },
+        }]))
+
+        expect(page.lists).toEqual([{ id: '1', name: 'Design' }])
+    })
+
     it('accepts a validated timeline with no lists', () => {
         expect(parseListsPage(listPayload([cursorEntry('END')]))).toEqual({ lists: [], cursor: 'END' })
     })

@@ -107,7 +107,7 @@ function createBadgeIcon() {
 // Idempotent: safe to call again when a handle's lists change.
 function paint(node: HTMLElement): boolean {
     const found = findHandle(node);
-    const parent = found?.span.parentElement;
+    const parent = found?.link.parentElement;
     if (!found || !parent) {
         for (const stale of Array.from(node.querySelectorAll<HTMLElement>(`.${BADGE_CLASS}`))) {
             if (stale.parentElement) removeBadges(stale.parentElement);
