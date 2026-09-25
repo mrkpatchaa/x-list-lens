@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
     MSG,
     getMissingOperations,
+    getStoredQueryIds,
     isListMutationMessage,
     isQueryHarvestedMessage,
     isValidListId,
@@ -40,6 +41,28 @@ describe('page message validation', () => {
 })
 
 describe('setup state', () => {
+    afterEach(() => vi.unstubAllGlobals())
+
+    it('falls back to query IDs stored by the original extension', async () => {
+        vi.stubGlobal('chrome', {
+            storage: {
+                local: {
+                    get: vi.fn(async () => ({
+                        queryIds: {
+                            ListsManagementPageTimeline: 'legacy-lists',
+                            ListMembers: 'legacy-members',
+                        },
+                    })),
+                },
+            },
+        })
+
+        await expect(getStoredQueryIds()).resolves.toEqual({
+            ListsManagementPageTimeline: 'legacy-lists',
+            ListMembers: 'legacy-members',
+        })
+    })
+
     it('reports the exact missing operations in order', () => {
         expect(getMissingOperations({ ListMembers: 'abc123' }))
             .toEqual(['ListsManagementPageTimeline'])
