@@ -1,10 +1,11 @@
-import type { ListCache } from './shared'
+import { isValidListId, type ListCache } from './shared'
 
 export type XApiErrorKind =
     | 'auth'
     | 'contract'
     | 'graphql'
     | 'http'
+    | 'interrupted'
     | 'network'
     | 'rate_limit'
     | 'server'
@@ -34,7 +35,6 @@ type JsonRecord = Record<string, unknown>
 type ListSummary = { id: string; name: string }
 
 const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/
-const LIST_ID_RE = /^\d{1,32}$/
 const MAX_TRAVERSAL_NODES = 50_000
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -47,10 +47,6 @@ function getString(value: unknown): string | undefined {
 
 export function isValidHandle(value: unknown): value is string {
     return typeof value === 'string' && HANDLE_RE.test(value)
-}
-
-export function isValidListId(value: unknown): value is string {
-    return typeof value === 'string' && LIST_ID_RE.test(value)
 }
 
 export function assertSuccessfulGraphQLPayload(value: unknown, operation: string): JsonRecord {
@@ -66,7 +62,7 @@ export function assertSuccessfulGraphQLPayload(value: unknown, operation: string
         throw new XApiError(`X returned no data for ${operation}.`, 'contract', operation)
     }
 
-    return value.data
+    return value
 }
 
 function readPath(root: unknown, path: readonly string[]): unknown {

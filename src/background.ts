@@ -1,293 +1,431 @@
-import { MSG, getLocal, type ListCache, type ListMeta, type SyncState } from './shared';
+import {
+    HARVESTED_OPERATIONS,
+    MSG,
+    clearQueryId,
+    getLocal,
+    getStoredQueryIds,
+    isListMutationMessage,
+    isValidListId,
+    isValidQueryId,
+    storeQueryId,
+    type ListCache,
+    type ListMeta,
+    type QueryIds,
+    type RequiredOperation,
+    type SyncState,
+} from './shared'
+import { createDoneState, createErrorState, isSyncCancelled } from './sync-state'
+import {
+    XApiError,
+    assertSuccessfulGraphQLPayload,
+    parseListsPage,
+    parseMembersPage,
+    replaceListMembership,
+} from './x-api'
 
+// This public web token is shared by X's own client. It is not a user secret.
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
-// listCache stores list IDs, not names (v1 stored names). Bump to discard old shapes.
 const CACHE_VERSION = 2;
 const PAGE_SIZE = 100;
 const MUTATION_DEBOUNCE_MS = 1000;
 const INTER_LIST_DELAY_MS = 1000;
-const REQUEST_TIMEOUT_MS = 20000;
+const PAGE_DELAY_MIN_MS = 800;
+const PAGE_DELAY_JITTER_MS = 700;
+const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 3;
+const DIRTY_LIST_PREFIX = 'dirtyList:';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The popup reads status from storage, so it stays correct even if it was closed
-// while a sync was running.
+const touchServiceWorker = () => chrome.storage.local.set({ syncHeartbeat: Date.now() });
 const setSyncState = (syncState: SyncState) => chrome.storage.local.set({ syncState });
 
 async function getCsrfToken(): Promise<string> {
-    const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'ct0' });
-    if (!cookie?.value) throw new Error('Not logged into X');
-    return cookie.value;
+    try {
+        const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'ct0' });
+        if (!cookie?.value) throw new Error('Missing ct0 cookie');
+        return cookie.value;
+    } catch (error) {
+        throw new XApiError('Not logged into X.', 'auth', undefined, { cause: error });
+    }
 }
 
-async function getDynamicQueryId(operationName: string): Promise<string> {
-    const { queryIds } = await getLocal(['queryIds']);
-    const queryId = (queryIds || {})[operationName];
+async function getDynamicQueryId(operationName: RequiredOperation): Promise<string> {
+    const queryIds = await getStoredQueryIds();
+    const queryId = queryIds[operationName];
     if (!queryId) {
-        throw new Error(`Please click into one of your lists on X so we can harvest the ${operationName} query ID!`);
+        throw new XApiError(`Missing the ${operationName} query ID.`, 'setup', operationName);
     }
     return queryId;
 }
 
-// A single 429 used to abort the whole sync and throw away every list already
-// fetched. Back off and retry transient failures instead.
-async function fetchWithAuth(url: string, csrfToken: string, attempt = 0): Promise<any> {
-    let response: Response;
-    try {
-        response = await fetch(url, {
-            credentials: 'include', // the service worker's origin differs from x.com, so cookies need opting in
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-            headers: {
-                'Authorization': `Bearer ${BEARER_TOKEN}`,
-                'x-csrf-token': csrfToken,
-                'x-twitter-auth-type': 'OAuth2Session',
-                'x-twitter-active-user': 'yes',
-            },
-        });
-    } catch (e) {
-        if (attempt >= MAX_RETRIES) throw e;
-        await delay(2000 * 2 ** attempt);
-        return fetchWithAuth(url, csrfToken, attempt + 1);
+function retryDelay(response: Response, attempt: number): number {
+    const retryAfter = response.headers.get('retry-after');
+    if (retryAfter) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds)) return Math.min(8_000, Math.max(500, seconds * 1000));
     }
 
-    if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
-        console.warn(`[ListLens:Background] ${response.status} from X, backing off (attempt ${attempt + 1}).`);
-        await delay(2000 * 2 ** attempt);
-        return fetchWithAuth(url, csrfToken, attempt + 1);
+    const reset = Number(response.headers.get('x-rate-limit-reset'));
+    if (Number.isFinite(reset) && reset > 0) {
+        return Math.min(8_000, Math.max(500, reset * 1000 - Date.now()));
     }
 
-    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
-    return response.json();
+    return Math.min(8_000, 1_000 * 2 ** attempt + Math.floor(Math.random() * 400));
 }
 
-function collectScreenNames(obj: any, into: string[]) {
-    if (!obj || typeof obj !== 'object') return;
-    if (typeof obj.screen_name === 'string' && obj.screen_name.length > 0) into.push(obj.screen_name);
-    for (const key of Object.keys(obj)) collectScreenNames(obj[key], into);
-}
-
-// Read members off the timeline entries rather than deep-scanning the whole
-// response, which also picked up the list owner and other embedded users.
-function parseMembersPage(data: any): { handles: string[]; cursor: string } {
-    const instructions = data?.data?.list?.members_timeline?.timeline?.instructions || [];
-    const entries = instructions.find((i: any) => i.type === 'TimelineAddEntries')?.entries || [];
-
-    const handles: string[] = [];
-    let cursor = '';
-
-    for (const entry of entries) {
-        const entryId: string = entry?.entryId || '';
-        if (entryId.startsWith('cursor-bottom')) {
-            cursor = entry?.content?.value || '';
-            continue;
+async function fetchWithAuth(url: string, csrfToken: string, operation: RequiredOperation): Promise<unknown> {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        let response: Response;
+        try {
+            response = await fetch(url, {
+                credentials: 'include',
+                signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+                headers: {
+                    'Authorization': `Bearer ${BEARER_TOKEN}`,
+                    'x-csrf-token': csrfToken,
+                    'x-twitter-auth-type': 'OAuth2Session',
+                    'x-twitter-active-user': 'yes',
+                },
+            });
+        } catch (error) {
+            const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
+            if (attempt < MAX_RETRIES) {
+                await delay(retryDelay(new Response(), attempt));
+                continue;
+            }
+            throw new XApiError(
+                timedOut ? 'The request to X timed out.' : 'Could not reach X.',
+                timedOut ? 'timeout' : 'network',
+                operation,
+                { cause: error },
+            );
         }
-        const result = entry?.content?.itemContent?.user_results?.result;
-        const screenName = result?.core?.screen_name ?? result?.legacy?.screen_name;
-        if (typeof screenName === 'string' && screenName) handles.push(screenName);
+
+        if (response.status === 400 || response.status === 404) {
+            await clearQueryId(operation);
+            throw new XApiError(`X no longer recognizes the ${operation} request.`, 'setup', operation);
+        }
+
+        if (response.status === 401 || response.status === 403) {
+            throw new XApiError('X rejected the signed-in session.', 'auth', operation);
+        }
+
+        if (response.status === 429 || response.status >= 500) {
+            if (attempt < MAX_RETRIES) {
+                await delay(retryDelay(response, attempt));
+                continue;
+            }
+            throw new XApiError(
+                response.status === 429 ? 'X is rate-limiting requests.' : 'X is having trouble right now.',
+                response.status === 429 ? 'rate_limit' : 'server',
+                operation,
+            );
+        }
+
+        if (!response.ok) {
+            throw new XApiError(`X returned HTTP ${response.status}.`, 'http', operation);
+        }
+
+        let payload: unknown;
+        try {
+            payload = await response.json();
+        } catch (error) {
+            throw new XApiError('X returned invalid JSON.', 'contract', operation, { cause: error });
+        }
+        return assertSuccessfulGraphQLPayload(payload, operation);
     }
 
-    // Fall back to the old deep scan if X changes the payload shape on us.
-    if (handles.length === 0) collectScreenNames(entries.length > 0 ? entries : data, handles);
-
-    return { handles, cursor };
+    throw new XApiError('The request could not be completed.', 'unknown', operation);
 }
+
+type PageOptions = {
+    onPage?: () => Promise<void>;
+    isCancelled?: () => Promise<boolean>;
+};
 
 async function fetchListMembers(
     listId: string,
     membersQueryId: string,
     csrfToken: string,
-    cancelled: () => boolean = () => false,
+    options: PageOptions = {},
 ): Promise<Set<string>> {
     const members = new Set<string>();
     const seenCursors = new Set<string>();
     let cursor = '';
-    let pagesWithoutHandles = 0;
 
     while (true) {
         const variables = JSON.stringify({ listId, count: PAGE_SIZE, cursor: cursor || undefined });
         const url = `https://x.com/i/api/graphql/${membersQueryId}/ListMembers?variables=${encodeURIComponent(variables)}`;
-        const { handles, cursor: nextCursor } = parseMembersPage(await fetchWithAuth(url, csrfToken));
+        const page = parseMembersPage(await fetchWithAuth(url, csrfToken, 'ListMembers'));
+        for (const handle of page.handles) members.add(handle.toLowerCase());
 
-        for (const handle of handles) members.add(handle.toLowerCase());
+        await options.onPage?.();
+        if (await options.isCancelled?.()) break;
+        if (!page.cursor || page.cursor === cursor || seenCursors.has(page.cursor)) break;
 
-        if (handles.length === 0) {
-            if (++pagesWithoutHandles >= 2) break;
-        } else {
-            pagesWithoutHandles = 0;
-        }
-
-        if (cancelled()) break;
-        if (!nextCursor || nextCursor === cursor || seenCursors.has(nextCursor)) break;
-        seenCursors.add(nextCursor);
-        cursor = nextCursor;
-
-        await delay(Math.floor(Math.random() * 700) + 800);
+        seenCursors.add(page.cursor);
+        cursor = page.cursor;
+        await delay(Math.floor(Math.random() * PAGE_DELAY_JITTER_MS) + PAGE_DELAY_MIN_MS);
     }
 
     return members;
 }
 
-// Serialize every cache read-modify-write so overlapping syncs can't clobber each other.
-let cacheWrites: Promise<void> = Promise.resolve();
-function updateCache(mutate: (cache: ListCache) => void): Promise<void> {
-    // Swallow failures into the chain: one rejection would otherwise poison every
-    // queued write that follows it.
-    const next = cacheWrites.then(async () => {
-        const { listCache } = await getLocal(['listCache']);
-        const cache = (listCache || {}) as ListCache;
-        mutate(cache);
-        for (const handle of Object.keys(cache)) {
-            if (cache[handle].length === 0) delete cache[handle];
-        }
-        await chrome.storage.local.set({ listCache: cache });
-    });
-    cacheWrites = next.catch((e) => { console.error('[ListLens:Background] Cache write failed', e); });
-    return next;
+async function fetchAllLists(
+    listsQueryId: string,
+    csrfToken: string,
+    onPage?: () => Promise<void>,
+): Promise<Array<{ id: string; name: string }>> {
+    const lists = new Map<string, { id: string; name: string }>();
+    const seenCursors = new Set<string>();
+    let cursor = '';
+
+    while (true) {
+        const variables = JSON.stringify({ count: PAGE_SIZE, cursor: cursor || undefined });
+        const url = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent(variables)}`;
+        const page = parseListsPage(await fetchWithAuth(url, csrfToken, 'ListsManagementPageTimeline'));
+        for (const list of page.lists) lists.set(list.id, list);
+
+        await onPage?.();
+        if (!page.cursor || page.cursor === cursor || seenCursors.has(page.cursor)) break;
+
+        seenCursors.add(page.cursor);
+        cursor = page.cursor;
+        await delay(500);
+    }
+
+    return [...lists.values()];
 }
 
-// ---------------------------------------------------------
-// TARGETED LIST SYNC
-// Triggered when a user is added/removed natively on X.
-// ---------------------------------------------------------
-const inFlight = new Set<string>();
+let cacheWrites: Promise<void> = Promise.resolve();
+function updateListMembership(listId: string, members: ReadonlySet<string>): Promise<void> {
+    const nextWrite = cacheWrites.then(async () => {
+        const { listCache } = await getLocal(['listCache']);
+        const nextCache = replaceListMembership((listCache || {}) as ListCache, listId, members);
+        try {
+            await chrome.storage.local.set({ listCache: nextCache });
+        } catch (error) {
+            throw new XApiError('The local list cache could not be saved.', 'storage', 'ListMembers', { cause: error });
+        }
+    });
 
-async function syncSingleList(listId: string) {
-    // A second mutation landing mid-refetch must not race the first one; re-queue it.
-    if (inFlight.has(listId)) {
-        queueListSync(listId);
-        return;
-    }
-    inFlight.add(listId);
+    cacheWrites = nextWrite.catch((error) => {
+        console.error('[ListLens:Background] Cache write failed', error);
+    });
+    return nextWrite;
+}
+
+const inFlightLists = new Set<string>();
+
+async function syncSingleList(listId: string): Promise<boolean> {
+    if (inFlightLists.has(listId)) return false;
+    inFlightLists.add(listId);
 
     const { listMeta } = await getLocal(['listMeta']);
     const listName = (listMeta || {})[listId] || listId;
-    console.log(`[ListLens:Background] Performing targeted sync for modified list: "${listName}"`);
+    console.info(`[ListLens:Background] Refreshing changed list: "${listName}"`);
 
     try {
         const csrfToken = await getCsrfToken();
         const membersQueryId = await getDynamicQueryId('ListMembers');
-        const members = await fetchListMembers(listId, membersQueryId, csrfToken);
-
-        await updateCache((cache) => {
-            for (const handle of Object.keys(cache)) {
-                cache[handle] = cache[handle].filter((id) => id !== listId);
-            }
-            for (const handle of members) {
-                if (!cache[handle]) cache[handle] = [];
-                if (!cache[handle].includes(listId)) cache[handle].push(listId);
-            }
-        });
-
-        console.log(`[ListLens:Background] Targeted sync complete! ${members.size} members in "${listName}".`);
-    } catch (e) {
-        console.error(`[ListLens:Background] Targeted sync failed for ${listName}`, e);
+        const members = await fetchListMembers(listId, membersQueryId, csrfToken, { onPage: touchServiceWorker });
+        await updateListMembership(listId, members);
+        console.info(`[ListLens:Background] Refreshed "${listName}" with ${members.size} members.`);
+        return true;
+    } catch (error) {
+        console.error(`[ListLens:Background] Could not refresh "${listName}"`, error);
+        return false;
     } finally {
-        inFlight.delete(listId);
+        inFlightLists.delete(listId);
     }
 }
 
-// A user adding several people in a row shouldn't trigger a refetch per click.
-const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>();
-function queueListSync(listId: string) {
-    clearTimeout(pendingSyncs.get(listId));
-    pendingSyncs.set(listId, setTimeout(() => {
-        pendingSyncs.delete(listId);
-        if (!fullSyncRunning) syncSingleList(listId);
-    }, MUTATION_DEBOUNCE_MS));
-}
-
-// ---------------------------------------------------------
-// MAIN FULL SYNC
-// ---------------------------------------------------------
-function extractLists(obj: any, into: { id: string; name: string }[] = []): { id: string; name: string }[] {
-    if (!obj || typeof obj !== 'object') return into;
-    if (obj.id_str && obj.name && (obj.member_count !== undefined || obj.mode !== undefined)) {
-        into.push({ id: obj.id_str, name: obj.name });
-    }
-    for (const key of Object.keys(obj)) extractLists(obj[key], into);
-    return into;
-}
-
+let dirtySyncTimer: ReturnType<typeof setTimeout> | undefined;
+let dirtyProcessorRunning = false;
 let fullSyncRunning = false;
-let cancelRequested = false;
 
-async function syncLists() {
-    if (fullSyncRunning) return;
-    fullSyncRunning = true;
-    cancelRequested = false;
+function dirtyListKey(listId: string): string {
+    return `${DIRTY_LIST_PREFIX}${listId}`;
+}
+
+function scheduleDirtySync(delayMs = MUTATION_DEBOUNCE_MS): void {
+    if (fullSyncRunning || dirtySyncTimer) return;
+    dirtySyncTimer = setTimeout(() => {
+        dirtySyncTimer = undefined;
+        void processDirtySyncs();
+    }, delayMs);
+}
+
+function queueListSync(listId: string): void {
+    if (!isValidListId(listId)) return;
+    const queuedAt = Date.now();
+    void chrome.storage.local
+        .set({ [dirtyListKey(listId)]: queuedAt })
+        .then(() => scheduleDirtySync())
+        .catch((error) => console.error('[ListLens:Background] Could not queue changed list', error));
+}
+
+async function processDirtySyncs(): Promise<void> {
+    if (dirtyProcessorRunning || fullSyncRunning) return;
+    dirtyProcessorRunning = true;
 
     try {
-        await setSyncState({ status: 'running', done: 0, total: 0 });
+        const stored = await chrome.storage.local.get(null);
+        const dirtyLists = Object.entries(stored)
+            .filter(([key, queuedAt]) => key.startsWith(DIRTY_LIST_PREFIX) && typeof queuedAt === 'number')
+            .sort(([, a], [, b]) => Number(a) - Number(b));
 
+        for (const [key, queuedAt] of dirtyLists) {
+            if (fullSyncRunning) break;
+            const listId = key.slice(DIRTY_LIST_PREFIX.length);
+            if (!isValidListId(listId)) {
+                await chrome.storage.local.remove(key);
+                continue;
+            }
+
+            const refreshed = await syncSingleList(listId);
+            if (!refreshed) continue;
+
+            const latest = await chrome.storage.local.get(key);
+            if (latest[key] === queuedAt) await chrome.storage.local.remove(key);
+        }
+    } catch (error) {
+        console.error('[ListLens:Background] Could not process changed lists', error);
+    } finally {
+        dirtyProcessorRunning = false;
+    }
+}
+
+async function isCurrentRunCancelled(runId: string): Promise<boolean> {
+    const { syncState } = await getLocal(['syncState']);
+    return isSyncCancelled(syncState as SyncState | undefined, runId);
+}
+
+async function commitFullSync(
+    listCache: ListCache,
+    listMeta: ListMeta,
+    syncState: SyncState,
+): Promise<void> {
+    try {
+        await chrome.storage.local.set({
+            listCache,
+            listMeta,
+            lastSync: Date.now(),
+            cacheVersion: CACHE_VERSION,
+            syncState,
+        });
+    } catch (error) {
+        throw new XApiError('The local list cache could not be saved.', 'storage', undefined, { cause: error });
+    }
+}
+
+async function syncLists(): Promise<void> {
+    if (fullSyncRunning) return;
+    fullSyncRunning = true;
+    const runId = crypto.randomUUID();
+
+    try {
+        await setSyncState({ status: 'running', runId, done: 0, total: 0 });
         const csrfToken = await getCsrfToken();
         const listsQueryId = await getDynamicQueryId('ListsManagementPageTimeline');
         const membersQueryId = await getDynamicQueryId('ListMembers');
-
-        const listsUrl = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent('{"count":100}')}`;
-        const lists = extractLists(await fetchWithAuth(listsUrl, csrfToken));
-        if (lists.length === 0) throw new Error('Could not parse list structures from JSON.');
+        const lists = await fetchAllLists(listsQueryId, csrfToken, touchServiceWorker);
 
         const listMeta: ListMeta = {};
         for (const list of lists) listMeta[list.id] = list.name;
-        await chrome.storage.local.set({ listMeta });
 
         const localCache: ListCache = {};
         let done = 0;
-
         for (const list of lists) {
-            if (cancelRequested) break;
-            await setSyncState({ status: 'running', done, total: lists.length, list: list.name });
+            if (await isCurrentRunCancelled(runId)) break;
+            await setSyncState({ status: 'running', runId, done, total: lists.length, list: list.name });
 
-            const members = await fetchListMembers(list.id, membersQueryId, csrfToken, () => cancelRequested);
-            if (cancelRequested) break;
+            const members = await fetchListMembers(list.id, membersQueryId, csrfToken, {
+                onPage: touchServiceWorker,
+                isCancelled: () => isCurrentRunCancelled(runId),
+            });
+            if (await isCurrentRunCancelled(runId)) break;
 
             for (const handle of members) {
-                if (!localCache[handle]) localCache[handle] = [];
-                localCache[handle].push(list.id);
+                const listIds = localCache[handle] || [];
+                if (!listIds.includes(list.id)) listIds.push(list.id);
+                localCache[handle] = listIds;
             }
             done++;
-            await delay(INTER_LIST_DELAY_MS);
+            if (done < lists.length) await delay(INTER_LIST_DELAY_MS);
         }
 
-        if (cancelRequested) {
-            // Leave the previous cache untouched rather than committing a partial one.
-            console.log('[ListLens:Background] Sync cancelled by user.');
-            await setSyncState({ status: 'idle' });
+        if (await isCurrentRunCancelled(runId)) {
+            await setSyncState({ status: 'cancelled', at: Date.now() });
             return;
         }
 
-        await chrome.storage.local.set({ listCache: localCache, lastSync: Date.now(), cacheVersion: CACHE_VERSION });
-        await setSyncState({ status: 'done' });
+        await commitFullSync(
+            localCache,
+            listMeta,
+            createDoneState({ lists: lists.length, people: Object.keys(localCache).length }),
+        );
     } catch (error) {
-        await setSyncState({ status: 'error', error: String(error) });
+        await setSyncState(createErrorState(error));
     } finally {
         fullSyncRunning = false;
-        cancelRequested = false;
+        scheduleDirtySync(0);
     }
 }
 
+async function migrateQueryIds(queryIds: QueryIds | undefined): Promise<void> {
+    if (!queryIds || typeof queryIds !== 'object') return;
+    const writes: Promise<void>[] = [];
+    for (const operation of HARVESTED_OPERATIONS) {
+        const queryId = queryIds[operation];
+        if (isValidQueryId(queryId)) writes.push(storeQueryId(operation, queryId));
+    }
+    await Promise.all(writes);
+    await chrome.storage.local.remove('queryIds');
+}
+
+const recoveryPromise = (async () => {
+    const { syncState } = await getLocal(['syncState']);
+    if ((syncState as SyncState | undefined)?.status === 'running') {
+        await setSyncState(createErrorState(new XApiError(
+            'The sync was interrupted when the background service restarted. Your previous cache is still available.',
+            'interrupted',
+        )));
+    }
+})();
+
+void recoveryPromise.then(() => scheduleDirtySync(0)).catch(console.error);
+
 chrome.runtime.onInstalled.addListener(async () => {
-    const { cacheVersion } = await getLocal(['cacheVersion']);
+    const { cacheVersion, queryIds } = await getLocal(['cacheVersion', 'queryIds']);
+    await migrateQueryIds(queryIds as QueryIds | undefined);
     if (cacheVersion !== CACHE_VERSION) {
-        await chrome.storage.local.remove(['listCache', 'lastSync']);
+        await chrome.storage.local.remove(['listCache', 'listMeta', 'lastSync']);
         await chrome.storage.local.set({ cacheVersion: CACHE_VERSION });
     }
 });
 
-chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
-    if (message?.type === MSG.START_SYNC) {
-        syncLists();
-        sendResponse({ status: 'started' });
+chrome.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object') return;
+
+    const typedMessage = message as { type?: unknown };
+    if (typedMessage.type === MSG.START_SYNC) {
+        void recoveryPromise.then(syncLists).catch(console.error);
     }
 
-    if (message?.type === MSG.CANCEL_SYNC) {
-        cancelRequested = true;
-        sendResponse({ status: 'cancelling' });
+    if (typedMessage.type === MSG.CANCEL_SYNC) {
+        void (async () => {
+            await recoveryPromise;
+            const { syncState } = await getLocal(['syncState']);
+            const current = syncState as SyncState | undefined;
+            if (current?.status === 'running') {
+                await setSyncState({ ...current, cancelRequested: true });
+            }
+        })().catch(console.error);
     }
 
-    if (message?.type === MSG.LIST_MUTATION && message.payload?.listId) {
+    if (isListMutationMessage(message)) {
         queueListSync(message.payload.listId);
     }
 });

@@ -1,5 +1,13 @@
 import './badge.css';
-import { MSG, getLocal, type ListCache, type ListMeta } from './shared';
+import {
+    MSG,
+    getLocal,
+    isListMutationMessage,
+    isQueryHarvestedMessage,
+    storeQueryId,
+    type ListCache,
+    type ListMeta,
+} from './shared';
 
 let listCache: ListCache = {};
 let listMeta: ListMeta = {};
@@ -39,22 +47,15 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
 
 // Bridge between the MAIN-world interceptor and the service worker.
 window.addEventListener('message', (event) => {
-    if (event.source !== window || !event.data || typeof event.data !== 'object') return;
+    if (event.source !== window || event.origin !== window.location.origin) return;
 
-    if (event.data.type === MSG.QUERY_HARVESTED) {
-        const { operationName, queryId } = event.data.payload;
-        getLocal(['queryIds']).then((result) => {
-            const queryIds = (result.queryIds || {}) as Record<string, string>;
-            if (queryIds[operationName] === queryId) return;
-            queryIds[operationName] = queryId;
-            chrome.storage.local.set({ queryIds });
-        });
+    if (isQueryHarvestedMessage(event.data)) {
+        void storeQueryId(event.data.payload.operationName, event.data.payload.queryId);
+        return;
     }
 
-    // This branch was missing entirely, so native add/remove never reached the
-    // background and the cached counts never moved.
-    if (event.data.type === MSG.LIST_MUTATION) {
-        chrome.runtime
+    if (isListMutationMessage(event.data)) {
+        void chrome.runtime
             .sendMessage({ type: MSG.LIST_MUTATION, payload: event.data.payload })
             .catch(() => { /* service worker asleep or extension reloaded */ });
     }
