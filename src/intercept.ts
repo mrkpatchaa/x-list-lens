@@ -13,6 +13,7 @@ const HARVEST_OPERATIONS = ['ListsManagementPageTimeline', 'ListMembers', 'ListA
 const GRAPHQL_RE = /\/i\/api\/graphql\/([^/]+)\/([A-Za-z0-9_]+)/;
 const QUERY_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const ID_RE = /^\d{1,32}$/;
+const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
 
 // Remember what we already reported so we don't postMessage on every GraphQL call.
 const harvested = new Map<string, string>();
@@ -53,11 +54,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSuccessfulGraphQLPayload(value: unknown): boolean {
     if (!isRecord(value)) return false;
-    return !Array.isArray(value.errors) || value.errors.length === 0;
+    if (Array.isArray(value.errors) && value.errors.length > 0) return 'data' in value;
+    return true;
+}
+
+function findHandleForUser(value: unknown, userId: string, state = { count: 0 }): string | undefined {
+    if (state.count++ >= 10_000) return undefined;
+    if (Array.isArray(value)) {
+        for (const item of value) {
+            const handle = findHandleForUser(item, userId, state);
+            if (handle) return handle;
+        }
+        return undefined;
+    }
+    if (!isRecord(value)) return undefined;
+
+    const candidateId = value.rest_id ?? value.id_str ?? (isRecord(value.legacy) ? value.legacy.id_str : undefined);
+    if (candidateId === userId) {
+        const candidate = value.screen_name
+            ?? (isRecord(value.core) ? value.core.screen_name : undefined)
+            ?? (isRecord(value.legacy) ? value.legacy.screen_name : undefined);
+        if (typeof candidate === 'string' && HANDLE_RE.test(candidate)) return candidate.toLowerCase();
+    }
+
+    for (const child of Object.values(value)) {
+        const handle = findHandleForUser(child, userId, state);
+        if (handle) return handle;
+    }
+    return undefined;
 }
 
 // Announce the mutation only once the request and GraphQL payload have actually
-// succeeded, so the background re-fetch reads membership X has committed.
+// succeeded, so the background can apply a local membership delta.
 function emitMutation(url: string, body: unknown, responseBody: unknown) {
     try {
         const parsed = typeof body === 'string' ? JSON.parse(body) : body;
@@ -69,10 +97,11 @@ function emitMutation(url: string, body: unknown, responseBody: unknown) {
 
         const operation = operationNameFromUrl(url);
         const action = operation?.operationName === 'ListRemoveMember' ? 'remove' : 'add';
+        const handle = findHandleForUser(responseBody, userId);
         console.log(`[ListLens:Intercept] Mutation committed -> Action: ${action}, List ID: ${listId}`);
         postToPage({
             type: LIST_MUTATION,
-            payload: { userId, listId, action },
+            payload: { userId, listId, action, ...(handle ? { handle } : {}) },
         });
     } catch (error) {
         console.error('[ListLens:Intercept] Failed to parse mutation response:', error);

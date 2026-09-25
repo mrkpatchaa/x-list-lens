@@ -35,7 +35,7 @@ describe('page message validation', () => {
         })).toBe(true)
         expect(isListMutationMessage({
             type: MSG.LIST_MUTATION,
-            payload: { listId: '../../bad', userId: '456', action: 'add' },
+            payload: { listId: '../../bad', userId: '456', action: 'add', handle: 'alice' },
         })).toBe(false)
     })
 })

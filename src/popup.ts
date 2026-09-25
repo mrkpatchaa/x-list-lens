@@ -122,6 +122,7 @@ function render(
     meta: ListMeta,
     queryIds: QueryIds,
     lastSync?: number,
+    needsFullSync = false,
 ) {
     const people = Object.keys(cache).length;
     const lists = Object.keys(meta).length;
@@ -181,7 +182,10 @@ function render(
     }
 
     const stale = lastSync !== undefined && Date.now() - lastSync > STALE_AFTER_MS;
-    if (cancelled) {
+    if (needsFullSync) {
+        hintMsg.textContent = 'A list change could not be matched to a cached profile. Run a full sync when convenient.';
+        show(hintMsg, true);
+    } else if (cancelled) {
         hintMsg.textContent = 'Sync stopped. Your previous badges are still available.';
         show(hintMsg, true);
     } else if (done && done.listCount === 0) {
@@ -197,7 +201,7 @@ function render(
 
 async function refresh() {
     const [stored, queryIds] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'needsFullSync']),
         getStoredQueryIds(),
     ]);
     render(
@@ -206,6 +210,7 @@ async function refresh() {
         (stored.listMeta || {}) as ListMeta,
         queryIds,
         typeof stored.lastSync === 'number' ? stored.lastSync : undefined,
+        stored.needsFullSync === true,
     );
 }
 
@@ -246,6 +251,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         || key === 'listCache'
         || key === 'listMeta'
         || key === 'lastSync'
+        || key === 'needsFullSync'
         || key.startsWith('queryId:'),
     );
     if (relevant) void refresh();

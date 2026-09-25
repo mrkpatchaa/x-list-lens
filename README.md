@@ -28,7 +28,7 @@ Four pieces run in separate extension contexts:
 ### Syncing
 
 - **Full sync** — triggered from the popup. Walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
-- **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor notices only after the request and GraphQL response succeed, then the service worker re-reads that list.
+- **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor confirms the mutation and the service worker applies a local membership delta instead of re-reading the list. A small `userId → handle` index is learned during full sync. If a changed account is not in that index, the extension asks for a manual full sync rather than silently walking a large list.
 - **Durable recovery** — changed-list work is persisted, and an interrupted service-worker sync is reported as interrupted instead of leaving the popup stuck on “Running.” The previous cache remains available.
 - **Safe cancellation** — cancellation is persisted while a sync is running. Stopping leaves the previous cache intact.
 
@@ -36,7 +36,7 @@ There is no scheduled background sync. The extension only talks to X when you as
 
 ### Where your data lives
 
-Everything stays in `chrome.storage.local` on your machine. Nothing is sent anywhere except to x.com, using the session cookies your browser already has. The cache maps a lowercased handle to a set of **list IDs**; names are resolved at render time from a separate ID→name map.
+Everything stays in `chrome.storage.local` on your machine. Nothing is sent anywhere except to x.com, using the session cookies your browser already has. The cache maps a lowercased handle to a set of **list IDs**; names are resolved at render time from a separate ID→name map. A small user-ID-to-handle index is also kept locally to apply confirmed membership changes without refetching entire lists.
 
 ---
 
@@ -81,7 +81,7 @@ After setup, hit **Sync lists**. A full sync can take a few minutes for large li
 
 - **It depends on X’s internals.** The GraphQL payload shape, `data-testid` attributes used to find handles, and the public web bearer token are X implementation details. The parser fails closed when it no longer recognizes a response, but a large enough X redesign will still require an update.
 - **The cache goes stale.** Changes made from another device or the mobile app won’t show until you re-sync. The popup nudges you after a week.
-- **Large lists are expensive to re-read.** A targeted sync re-reads the whole list, so changing membership on a list with thousands of members costs many requests.
+- **Large lists are expensive to re-read during a full sync.** Confirmed add/remove changes are applied locally, but a user not yet present in the `userId → handle` index requires a full sync to establish the mapping.
 - **List renames require a full sync.** Membership changes are detected automatically, but list names are refreshed during a full sync.
 - Only your own lists — not lists you merely follow.
 

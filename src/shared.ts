@@ -29,11 +29,12 @@ export type QueryHarvestedMessage = {
 
 export type ListMutationMessage = {
     type: typeof MSG.LIST_MUTATION;
-    payload: { userId: string; listId: string; action: 'add' | 'remove' };
+    payload: { userId: string; listId: string; action: 'add' | 'remove'; handle?: string };
 };
 
 const QUERY_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const LIST_ID_RE = /^\d{1,32}$/;
+const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -45,6 +46,10 @@ export function isValidQueryId(value: unknown): value is string {
 
 export function isValidListId(value: unknown): value is string {
     return typeof value === 'string' && LIST_ID_RE.test(value);
+}
+
+export function isValidHandle(value: unknown): value is string {
+    return typeof value === 'string' && HANDLE_RE.test(value);
 }
 
 function isHarvestedOperation(value: unknown): value is HarvestedOperation {
@@ -60,7 +65,8 @@ export function isListMutationMessage(value: unknown): value is ListMutationMess
     if (!isRecord(value) || value.type !== MSG.LIST_MUTATION || !isRecord(value.payload)) return false;
     return isValidListId(value.payload.listId)
         && isValidListId(value.payload.userId)
-        && (value.payload.action === 'add' || value.payload.action === 'remove');
+        && (value.payload.action === 'add' || value.payload.action === 'remove')
+        && (value.payload.handle === undefined || isValidHandle(value.payload.handle));
 }
 
 export function queryIdStorageKey(operationName: HarvestedOperation): string {
@@ -94,6 +100,8 @@ export async function clearQueryId(operationName: HarvestedOperation): Promise<v
 
 // A lowercased handle -> the IDs of the lists it belongs to.
 export type ListCache = Record<string, string[]>;
+// X user ID -> lowercased handle, learned while reading list members.
+export type UserHandleIndex = Record<string, string>;
 // List ID -> current display name.
 export type ListMeta = Record<string, string>;
 

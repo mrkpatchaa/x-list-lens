@@ -2,17 +2,19 @@ import {
     MSG,
     getLocal,
     getStoredQueryIds,
+    isListMutationMessage,
     type ListCache,
     type ListMeta,
     type SyncState,
+    type UserHandleIndex,
 } from './shared';
+import { applyMembershipDelta } from './cache-delta';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
 // listCache stores list IDs, not names (v1 stored names). Bump to discard old shapes.
 const CACHE_VERSION = 2;
 const PAGE_SIZE = 100;
-const MUTATION_DEBOUNCE_MS = 1000;
 const INTER_LIST_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_RETRIES = 3;
@@ -75,13 +77,17 @@ function collectScreenNames(obj: any, into: string[]) {
     for (const key of Object.keys(obj)) collectScreenNames(obj[key], into);
 }
 
+type MemberIdentity = { userId: string; handle: string };
+const USER_ID_RE = /^\d{1,32}$/;
+
 // Read members off the timeline entries rather than deep-scanning the whole
 // response, which also picked up the list owner and other embedded users.
-function parseMembersPage(data: any): { handles: string[]; cursor: string } {
+function parseMembersPage(data: any): { handles: string[]; cursor: string; members: MemberIdentity[] } {
     const instructions = data?.data?.list?.members_timeline?.timeline?.instructions || [];
     const entries = instructions.find((i: any) => i.type === 'TimelineAddEntries')?.entries || [];
 
     const handles: string[] = [];
+    const members: MemberIdentity[] = [];
     let cursor = '';
 
     for (const entry of entries) {
@@ -92,13 +98,19 @@ function parseMembersPage(data: any): { handles: string[]; cursor: string } {
         }
         const result = entry?.content?.itemContent?.user_results?.result;
         const screenName = result?.core?.screen_name ?? result?.legacy?.screen_name;
-        if (typeof screenName === 'string' && screenName) handles.push(screenName);
+        if (typeof screenName === 'string' && screenName) {
+            handles.push(screenName);
+            const userId = result?.rest_id ?? result?.id_str ?? result?.legacy?.id_str;
+            if (typeof userId === 'string' && USER_ID_RE.test(userId)) {
+                members.push({ userId, handle: screenName.toLowerCase() });
+            }
+        }
     }
 
     // Fall back to the old deep scan if X changes the payload shape on us.
     if (handles.length === 0) collectScreenNames(entries.length > 0 ? entries : data, handles);
 
-    return { handles, cursor };
+    return { handles, cursor, members };
 }
 
 async function fetchListMembers(
@@ -106,6 +118,7 @@ async function fetchListMembers(
     membersQueryId: string,
     csrfToken: string,
     cancelled: () => boolean = () => false,
+    onMember: (member: MemberIdentity) => void = () => undefined,
 ): Promise<Set<string>> {
     const members = new Set<string>();
     const seenCursors = new Set<string>();
@@ -115,9 +128,12 @@ async function fetchListMembers(
     while (true) {
         const variables = JSON.stringify({ listId, count: PAGE_SIZE, cursor: cursor || undefined });
         const url = `https://x.com/i/api/graphql/${membersQueryId}/ListMembers?variables=${encodeURIComponent(variables)}`;
-        const { handles, cursor: nextCursor } = parseMembersPage(await fetchWithAuth(url, csrfToken));
+        const page = parseMembersPage(await fetchWithAuth(url, csrfToken));
+        const handles = page.handles;
+        const nextCursor = page.cursor;
 
         for (const handle of handles) members.add(handle.toLowerCase());
+        for (const member of page.members) onMember(member);
 
         if (handles.length === 0) {
             if (++pagesWithoutHandles >= 2) break;
@@ -136,73 +152,39 @@ async function fetchListMembers(
     return members;
 }
 
-// Serialize every cache read-modify-write so overlapping syncs can't clobber each other.
-let cacheWrites: Promise<void> = Promise.resolve();
-function updateCache(mutate: (cache: ListCache) => void): Promise<void> {
-    // Swallow failures into the chain: one rejection would otherwise poison every
-    // queued write that follows it.
-    const next = cacheWrites.then(async () => {
-        const { listCache } = await getLocal(['listCache']);
-        const cache = (listCache || {}) as ListCache;
-        mutate(cache);
-        for (const handle of Object.keys(cache)) {
-            if (cache[handle].length === 0) delete cache[handle];
-        }
-        await chrome.storage.local.set({ listCache: cache });
-    });
-    cacheWrites = next.catch((e) => { console.error('[ListLens:Background] Cache write failed', e); });
-    return next;
-}
-
 // ---------------------------------------------------------
-// TARGETED LIST SYNC
-// Triggered when a user is added/removed natively on X.
+// TARGETED LIST MUTATIONS
+// Apply the membership delta locally; do not re-walk the whole list.
 // ---------------------------------------------------------
-const inFlight = new Set<string>();
-
-async function syncSingleList(listId: string) {
-    // A second mutation landing mid-refetch must not race the first one; re-queue it.
-    if (inFlight.has(listId)) {
-        queueListSync(listId);
-        return;
-    }
-    inFlight.add(listId);
-
-    const { listMeta } = await getLocal(['listMeta']);
-    const listName = (listMeta || {})[listId] || listId;
-    console.log(`[ListLens:Background] Performing targeted sync for modified list: "${listName}"`);
-
+async function applyListMutation(payload: {
+    listId: string;
+    userId: string;
+    action: 'add' | 'remove';
+    handle?: string;
+}): Promise<void> {
     try {
-        const csrfToken = await getCsrfToken();
-        const membersQueryId = await getDynamicQueryId('ListMembers');
-        const members = await fetchListMembers(listId, membersQueryId, csrfToken);
+        const { listCache, userHandles } = await getLocal(['listCache', 'userHandles']);
+        const index = (userHandles || {}) as UserHandleIndex;
+        const handle = payload.handle || index[payload.userId];
 
-        await updateCache((cache) => {
-            for (const handle of Object.keys(cache)) {
-                cache[handle] = cache[handle].filter((id) => id !== listId);
-            }
-            for (const handle of members) {
-                if (!cache[handle]) cache[handle] = [];
-                if (!cache[handle].includes(listId)) cache[handle].push(listId);
-            }
-        });
+        if (!handle) {
+            await chrome.storage.local.set({ needsFullSync: true });
+            console.warn(`[ListLens:Background] No cached handle for user ${payload.userId}; full sync required.`);
+            return;
+        }
 
-        console.log(`[ListLens:Background] Targeted sync complete! ${members.size} members in "${listName}".`);
-    } catch (e) {
-        console.error(`[ListLens:Background] Targeted sync failed for ${listName}`, e);
-    } finally {
-        inFlight.delete(listId);
+        const nextCache = applyMembershipDelta(
+            (listCache || {}) as ListCache,
+            payload.listId,
+            handle,
+            payload.action,
+        );
+        const nextIndex = { ...index, [payload.userId]: handle.toLowerCase() };
+        await chrome.storage.local.set({ listCache: nextCache, userHandles: nextIndex });
+        console.info(`[ListLens:Background] Applied ${payload.action} for @${handle} without refetching the list.`);
+    } catch (error) {
+        console.error('[ListLens:Background] Could not apply list mutation', error);
     }
-}
-
-// A user adding several people in a row shouldn't trigger a refetch per click.
-const pendingSyncs = new Map<string, ReturnType<typeof setTimeout>>();
-function queueListSync(listId: string) {
-    clearTimeout(pendingSyncs.get(listId));
-    pendingSyncs.set(listId, setTimeout(() => {
-        pendingSyncs.delete(listId);
-        if (!fullSyncRunning) syncSingleList(listId);
-    }, MUTATION_DEBOUNCE_MS));
 }
 
 // ---------------------------------------------------------
@@ -241,13 +223,21 @@ async function syncLists() {
         await chrome.storage.local.set({ listMeta });
 
         const localCache: ListCache = {};
+        const { userHandles } = await getLocal(['userHandles']);
+        const nextUserHandles: UserHandleIndex = { ...(userHandles || {}) };
         let done = 0;
 
         for (const list of lists) {
             if (cancelRequested) break;
             await setSyncState({ status: 'running', done, total: lists.length, list: list.name });
 
-            const members = await fetchListMembers(list.id, membersQueryId, csrfToken, () => cancelRequested);
+            const members = await fetchListMembers(
+                list.id,
+                membersQueryId,
+                csrfToken,
+                () => cancelRequested,
+                (member) => { nextUserHandles[member.userId] = member.handle; },
+            );
             if (cancelRequested) break;
 
             for (const handle of members) {
@@ -265,7 +255,13 @@ async function syncLists() {
             return;
         }
 
-        await chrome.storage.local.set({ listCache: localCache, lastSync: Date.now(), cacheVersion: CACHE_VERSION });
+        await chrome.storage.local.set({
+            listCache: localCache,
+            userHandles: nextUserHandles,
+            needsFullSync: false,
+            lastSync: Date.now(),
+            cacheVersion: CACHE_VERSION,
+        });
         await setSyncState({ status: 'done' });
     } catch (error) {
         console.error('[ListLens:Background] Full sync failed', error);
@@ -279,7 +275,7 @@ async function syncLists() {
 chrome.runtime.onInstalled.addListener(async () => {
     const { cacheVersion } = await getLocal(['cacheVersion']);
     if (cacheVersion !== CACHE_VERSION) {
-        await chrome.storage.local.remove(['listCache', 'lastSync']);
+        await chrome.storage.local.remove(['listCache', 'userHandles', 'needsFullSync', 'lastSync']);
         await chrome.storage.local.set({ cacheVersion: CACHE_VERSION });
     }
 });
@@ -295,7 +291,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
         sendResponse({ status: 'cancelling' });
     }
 
-    if (message?.type === MSG.LIST_MUTATION && message.payload?.listId) {
-        queueListSync(message.payload.listId);
+    if (isListMutationMessage(message)) {
+        void applyListMutation(message.payload);
     }
 });
