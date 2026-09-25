@@ -165,10 +165,9 @@ describe('parseListsPage', () => {
     })
 
     it('finds legacy list records outside timeline entries', () => {
-        const payload = listPayload([cursorEntry('END')]) as {
-            data: { legacy_list: ReturnType<typeof listRecord> }
-        }
-        payload.data.legacy_list = listRecord('1', 'Design')
+        const payload = listPayload([cursorEntry('END')])
+        const data = payload.data as Record<string, unknown>
+        data.legacy_list = listRecord('1', 'Design')
 
         expect(parseListsPage(payload).lists).toEqual([{ id: '1', name: 'Design' }])
     })
