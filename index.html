@@ -67,6 +67,23 @@
       </div>
     </section>
 
+    <section id="listsSection" class="hidden rounded-xl border border-slate-800 bg-slate-900/50 p-3.5" aria-labelledby="listsHeading">
+      <div class="flex items-center justify-between gap-3">
+        <h2 id="listsHeading" class="text-sm font-semibold text-slate-200">Your lists</h2>
+        <span id="listsCount" class="text-[11px] text-slate-500">0 lists</span>
+      </div>
+      <label class="relative mt-3 block" for="listsSearch">
+        <span class="sr-only">Filter your lists</span>
+        <svg viewBox="0 0 24 24" class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <path d="m20 20-4-4"></path>
+        </svg>
+        <input id="listsSearch" type="search" placeholder="Filter lists" autocomplete="off" class="w-full rounded-lg border border-slate-800 bg-slate-950 py-2 pl-8 pr-2 text-xs text-slate-200 outline-none placeholder:text-slate-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40">
+      </label>
+      <div id="listsList" class="mt-2 max-h-40 space-y-1 overflow-y-auto pr-0.5" role="list"></div>
+      <p id="listsEmpty" class="mt-2 text-xs text-slate-500" hidden></p>
+    </section>
+
     <section id="progressWrap" class="hidden flex-col gap-2" aria-label="Sync progress">
       <div class="flex items-center justify-between gap-3">
         <p class="text-xs font-medium text-slate-300">Syncing your Lists</p>

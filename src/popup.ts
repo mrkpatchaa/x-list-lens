@@ -25,6 +25,11 @@ const statusBadge = el<HTMLSpanElement>('statusBadge');
 const peopleCount = el<HTMLSpanElement>('peopleCount');
 const peopleWord = el<HTMLSpanElement>('peopleWord');
 const listCount = el<HTMLParagraphElement>('listCount');
+const listsSection = el<HTMLElement>('listsSection');
+const listsCount = el<HTMLSpanElement>('listsCount');
+const listsSearch = el<HTMLInputElement>('listsSearch');
+const listsList = el<HTMLDivElement>('listsList');
+const listsEmpty = el<HTMLParagraphElement>('listsEmpty');
 const lastSyncEl = el<HTMLParagraphElement>('lastSync');
 const progressWrap = el<HTMLDivElement>('progressWrap');
 const progressBar = el<HTMLDivElement>('progressBar');
@@ -96,6 +101,60 @@ function setStatus(label: string, kind: keyof typeof statusClasses) {
     statusBadge.className = statusClasses[kind];
 }
 
+let listFilter = '';
+let currentCache: ListCache = {};
+let currentMeta: ListMeta = {};
+
+function renderLists(cache: ListCache, meta: ListMeta) {
+    const memberCounts = new Map<string, number>();
+    for (const listIds of Object.values(cache)) {
+        for (const listId of listIds) memberCounts.set(listId, (memberCounts.get(listId) || 0) + 1);
+    }
+
+    const entries = Object.entries(meta)
+        .map(([id, name]) => ({ id, name, count: memberCounts.get(id) || 0 }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const query = listFilter.trim().toLowerCase();
+    const filtered = entries.filter(({ name }) => !query || name.toLowerCase().includes(query));
+
+    show(listsSection, entries.length > 0);
+    listsCount.textContent = plural(entries.length, 'list');
+    listsList.replaceChildren();
+    listsEmpty.hidden = filtered.length > 0;
+    listsEmpty.textContent = entries.length === 0
+        ? 'No synced lists yet.'
+        : 'No lists match that filter.';
+
+    for (const { id, name, count } of filtered) {
+        const item = document.createElement('div');
+        item.setAttribute('role', 'listitem');
+
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+        button.title = `Open ${name} on X`;
+
+        const label = document.createElement('span');
+        label.className = 'min-w-0 truncate text-xs font-medium text-slate-200';
+        label.textContent = name;
+        const countLabel = document.createElement('span');
+        countLabel.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
+        countLabel.textContent = plural(count, 'person', 'people');
+        button.append(label, countLabel);
+        button.addEventListener('click', () => {
+            void chrome.tabs.create({ url: `https://x.com/i/lists/${encodeURIComponent(id)}` });
+            window.close();
+        });
+        item.appendChild(button);
+        listsList.appendChild(item);
+    }
+}
+
+listsSearch.addEventListener('input', () => {
+    listFilter = listsSearch.value;
+    renderLists(currentCache, currentMeta);
+});
+
 function renderSetup(queryIds: QueryIds) {
     const missing = getMissingOperations(queryIds);
     const needsListMembers = missing.includes('ListMembers');
@@ -131,10 +190,13 @@ function render(
     const done = state?.status === 'done' ? state : undefined;
     const cancelled = state?.status === 'cancelled' ? state : undefined;
     const ready = getMissingOperations(queryIds).length === 0;
+    currentCache = cache;
+    currentMeta = meta;
 
     peopleCount.textContent = numberFormat.format(people);
     peopleWord.textContent = people === 1 ? 'person' : 'people';
     listCount.textContent = lists ? `Across ${plural(lists, 'list')}` : 'No lists synced yet';
+    renderLists(cache, meta);
     lastSyncEl.textContent = lastSync ? `Last synced ${relativeTime(lastSync)}` : 'Never synced';
 
     renderSetup(queryIds);
