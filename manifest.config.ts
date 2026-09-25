@@ -1,11 +1,13 @@
 // manifest.config.ts
 import { defineManifest } from '@crxjs/vite-plugin'
+import packageJson from './package.json' with { type: 'json' }
 
 export default defineManifest({
     manifest_version: 3,
     name: 'ListLens for X',
-    version: '1.0.0',
+    version: packageJson.version,
     description: 'Instantly see who is in your lists on X/Twitter.',
+    minimum_chrome_version: '111',
     permissions: ['storage', 'cookies'],
     host_permissions: ['*://*.twitter.com/*', '*://*.x.com/*'],
     background: {
@@ -27,5 +29,15 @@ export default defineManifest({
     ],
     action: {
         default_popup: 'index.html',
+        default_icon: {
+            '16': 'listlens-16.png',
+            '32': 'listlens-32.png',
+        },
+    },
+    icons: {
+        '16': 'listlens-16.png',
+        '32': 'listlens-32.png',
+        '48': 'listlens-48.png',
+        '128': 'listlens.png',
     },
 })

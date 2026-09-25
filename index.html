@@ -2,51 +2,108 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link href="./src/index.css" rel="stylesheet">
-  <title>ListLens</title>
+  <title>ListLens for X</title>
 </head>
-<body class="w-72 bg-slate-900 text-white p-4 font-sans">
-  <div class="flex flex-col gap-3">
-    <div class="flex items-center justify-between">
-      <h1 class="text-lg font-bold text-blue-400">ListLens</h1>
-      <span id="statusBadge" role="status" aria-live="polite" class="px-2 py-1 text-xs bg-slate-800 rounded-full">Idle</span>
-    </div>
-
-    <!-- Shown until the GraphQL query IDs have been harvested; without them a sync
-         can only fail, so we guide instead of letting the user hit an error. -->
-    <div id="setupNotice" class="hidden bg-amber-950/60 border border-amber-800/60 p-3 rounded-lg flex flex-col gap-2">
-      <p class="text-sm font-semibold text-amber-300">One-time setup</p>
-      <p class="text-xs text-amber-100/80">ListLens needs to watch X load your Lists once before it can sync.</p>
-      <button id="openListsBtn" class="w-full bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold py-1.5 px-3 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-300">
-        Open my Lists on X
-      </button>
-    </div>
-
-    <div class="bg-slate-800 p-3 rounded-lg border border-slate-700">
-      <p class="text-2xl font-bold leading-tight"><span id="peopleCount">0</span> <span id="peopleWord" class="text-base font-normal text-slate-400">people</span></p>
-      <p id="listCount" class="text-sm text-slate-400">across 0 lists</p>
-      <p id="lastSync" class="text-xs text-slate-500 mt-1">Never synced</p>
-    </div>
-
-    <div id="progressWrap" class="hidden flex-col gap-1">
-      <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-        <div id="progressBar" class="h-full w-0 bg-blue-500 transition-all duration-300"></div>
+<body class="w-80 min-h-[420px] bg-slate-950 p-4 font-sans text-slate-100">
+  <main class="flex flex-col gap-4" aria-labelledby="appTitle">
+    <header class="flex items-center justify-between gap-3">
+      <div class="flex min-w-0 items-center gap-2.5">
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/15 text-blue-300" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="5" y="4" width="14" height="17" rx="2"></rect>
+            <path d="M9 4.5V3h6v1.5M9 10h6M9 14h4"></path>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <h1 id="appTitle" class="truncate text-lg font-bold tracking-tight text-white">ListLens</h1>
+          <p class="text-xs text-slate-400">Your lists, on X</p>
+        </div>
       </div>
-      <p id="progressLabel" class="text-xs text-slate-400 truncate">&nbsp;</p>
-    </div>
+      <span id="statusBadge" role="status" aria-live="polite" class="shrink-0 rounded-full bg-slate-800 px-2 py-1 text-[11px] font-semibold text-slate-300">Checking</span>
+    </header>
+
+    <section id="setupNotice" class="hidden flex-col gap-3 rounded-xl border border-amber-800/60 bg-amber-950/30 p-3.5" aria-labelledby="setupTitle">
+      <div class="flex items-start gap-2.5">
+        <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300" aria-hidden="true">
+          <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v18M3 12h18"></path>
+            <circle cx="12" cy="12" r="8.5"></circle>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <p id="setupEyebrow" class="text-xs font-semibold text-amber-300">One-time setup</p>
+          <h2 id="setupTitle" class="mt-0.5 text-sm font-semibold text-amber-50">Connect to your Lists</h2>
+        </div>
+      </div>
+      <p id="setupCopy" class="text-xs leading-5 text-amber-100/80">Open your Lists on X once so ListLens can learn the current request format.</p>
+      <div class="flex items-center gap-2 text-[11px] text-amber-100/75" aria-label="Setup progress">
+        <span id="setupListsStep" class="setup-step setup-step-pending">1</span>
+        <span>Open Lists</span>
+        <span class="h-px flex-1 bg-amber-800/70" aria-hidden="true"></span>
+        <span id="setupListStep" class="setup-step setup-step-pending">2</span>
+        <span>Open one list</span>
+      </div>
+      <button id="openListsBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-400 px-3 py-2 text-sm font-semibold text-slate-950 transition-colors hover:bg-amber-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-200">
+        <span>Open Lists on X</span>
+        <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 12h13M13 6l6 6-6 6"></path>
+        </svg>
+      </button>
+    </section>
+
+    <section class="rounded-xl border border-slate-800 bg-slate-900/70 p-3.5" aria-label="Local list cache">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm font-medium text-slate-300">Local cache</p>
+        <p id="lastSync" class="text-xs text-slate-500">Never synced</p>
+      </div>
+      <div class="mt-3 flex items-end justify-between gap-3">
+        <div class="flex items-baseline gap-1.5">
+          <span id="peopleCount" class="text-3xl font-bold leading-none tracking-tight text-white">0</span>
+          <span id="peopleWord" class="text-sm text-slate-400">people</span>
+        </div>
+        <p id="listCount" class="text-right text-sm text-slate-400">No lists synced yet</p>
+      </div>
+    </section>
+
+    <section id="progressWrap" class="hidden flex-col gap-2" aria-label="Sync progress">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-xs font-medium text-slate-300">Syncing your Lists</p>
+        <span class="text-[11px] text-slate-500">This can take a few minutes</span>
+      </div>
+      <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+        <div id="progressBar" class="h-full w-0 rounded-full bg-blue-500 transition-[width] duration-300" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div>
+      </div>
+      <p id="progressLabel" class="truncate text-xs text-slate-500" aria-live="polite">&nbsp;</p>
+    </section>
 
     <div class="flex gap-2">
-      <button id="syncBtn" class="flex-1 bg-blue-500 hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2 px-4 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-400">
-        Sync Lists Now
+      <button id="syncBtn" type="button" class="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 disabled:cursor-not-allowed disabled:opacity-40">
+        <svg viewBox="0 0 24 24" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M20 11a8.1 8.1 0 0 0-14.7-3L4 10"></path>
+          <path d="M4 5v5h5M4 13a8.1 8.1 0 0 0 14.7 3L20 14"></path>
+          <path d="M20 19v-5h-5"></path>
+        </svg>
+        <span>Sync lists</span>
       </button>
-      <button id="cancelBtn" class="hidden bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-semibold py-2 px-3 rounded transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400">
-        Stop
-      </button>
+      <button id="cancelBtn" type="button" class="hidden rounded-lg border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm font-semibold text-slate-200 transition-colors hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-wait disabled:opacity-60">Stop</button>
     </div>
 
-    <p id="hintMsg" class="text-xs text-slate-500 hidden"></p>
-    <p id="errorMsg" role="alert" class="text-xs text-red-400 hidden"></p>
-  </div>
+    <p id="hintMsg" class="hidden text-xs leading-5 text-slate-400"></p>
+    <p id="errorMsg" role="alert" class="hidden text-xs leading-5 text-red-300"></p>
+
+    <footer class="flex items-center justify-between gap-3 border-t border-slate-800/80 pt-3">
+      <span class="inline-flex min-w-0 items-center gap-1.5 text-[11px] text-slate-500">
+        <svg viewBox="0 0 24 24" class="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="5" y="10" width="14" height="10" rx="2"></rect>
+          <path d="M8 10V7a4 4 0 0 1 8 0v3"></path>
+        </svg>
+        Stored only on this device
+      </span>
+      <button id="reconnectBtn" type="button" class="shrink-0 text-[11px] font-medium text-slate-400 underline-offset-2 transition-colors hover:text-slate-200 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-50">Reconnect</button>
+    </footer>
+  </main>
   <script type="module" src="/src/popup.ts"></script>
 </body>
 </html>

@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+@layer components {
+  .setup-step {
+    display: inline-flex;
+    height: 18px;
+    width: 18px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .setup-step-pending {
+    border: 1px solid rgb(251 191 36 / 0.55);
+    color: rgb(252 211 77);
+  }
+
+  .setup-step-complete {
+    background: rgb(251 191 36);
+    color: rgb(15 23 42);
+  }
+}

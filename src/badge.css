@@ -1,36 +1,74 @@
-/* Injected via the manifest so it lands in the extension's own stylesheet origin
-   rather than depending on the page allowing inline styles. */
 .listlens-badge {
+  appearance: none;
   display: inline-flex;
   align-items: center;
-  font-size: 11px;
-  background: rgba(29, 155, 240, 0.15);
+  gap: 3px;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  margin-inline-start: 6px;
+  border: 1px solid rgba(29, 155, 240, 0.28);
+  border-radius: 5px;
+  background: rgba(29, 155, 240, 0.14);
   color: rgb(29, 155, 240);
-  padding: 0 4px;
-  border-radius: 4px;
-  margin-left: 6px;
-  cursor: default;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
-  height: 16px;
-  font-weight: bold;
+  vertical-align: middle;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-/* Instant, styled replacement for the native title tooltip, which takes ~1.5s to
-   appear and can't be read while scrolling a timeline. */
+.listlens-badge:hover {
+  border-color: rgba(29, 155, 240, 0.5);
+  background: rgba(29, 155, 240, 0.22);
+}
+
+.listlens-badge:focus-visible {
+  outline: 2px solid rgb(255, 255, 255);
+  outline-offset: 2px;
+}
+
+.listlens-badge-icon {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+
+.listlens-badge-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A fast, readable replacement for the native title tooltip. */
 .listlens-tip {
   position: fixed;
   z-index: 2147483647;
-  max-width: 260px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgb(21, 32, 43);
-  color: rgb(231, 233, 234);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.97);
+  color: rgb(241, 245, 249);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
   font-size: 12px;
-  line-height: 1.35;
   font-weight: 400;
+  line-height: 1.4;
   pointer-events: none;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .listlens-badge {
+    transition: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .listlens-badge {
+    border-color: ButtonText;
+    background: Canvas;
+    color: ButtonText;
+  }
 }
