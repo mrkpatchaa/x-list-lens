@@ -5,7 +5,9 @@ describe('badge target selection', () => {
     it('includes the profile header used above the feed', () => {
         document.body.innerHTML = '<div data-testid="UserProfileHeader_Items"><a href="/alice"><span>@alice</span></a></div>'
 
-        expect(document.querySelector(BADGE_TARGET_SELECTOR)).not.toBeNull()
+        const header = document.querySelector(BADGE_TARGET_SELECTOR) as HTMLElement
+        expect(header).not.toBeNull()
+        expect(findHandle(header)?.handle).toBe('alice')
     })
 })
 
