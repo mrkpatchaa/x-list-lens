@@ -31,12 +31,12 @@ describe('findHandle', () => {
         expect(findHandle(document.querySelector('[data-testid="UserName"]') as HTMLElement)).toBeNull()
     })
 
-    it('uses the profile route when the header handle is not yet linked', () => {
-        document.body.innerHTML = '<div data-testid="UserProfileHeader_Items"><span>@thecodinglove</span></div>'
-        const header = document.querySelector('[data-testid="UserProfileHeader_Items"]') as HTMLElement
+    it('uses the profile route when the UserName block is not linked', () => {
+        document.body.innerHTML = '<div data-testid="UserName"><span>@thecodinglove</span></div>'
+        const name = document.querySelector('[data-testid="UserName"]') as HTMLElement
 
         expect(getProfileHandleFromPath('/thecodinglove')).toBe('thecodinglove')
-        expect(findHandle(header, getProfileHandleFromPath('/thecodinglove'))).toMatchObject({ handle: 'thecodinglove' })
+        expect(findHandle(name, getProfileHandleFromPath('/thecodinglove'))).toMatchObject({ handle: 'thecodinglove' })
     })
 
     it('rejects a linked route that is not a profile handle', () => {

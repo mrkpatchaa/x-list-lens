@@ -31,8 +31,8 @@ const TIP_ID = 'listlens-tip';
 const profileHandle = getProfileHandleFromPath(window.location.pathname);
 
 function findHandleForNode(node: HTMLElement) {
-    const fallback = node.matches(PROFILE_HEADER_SELECTOR) ? profileHandle : undefined;
-    return findHandle(node, fallback);
+    const isProfileIdentity = node.matches(PROFILE_HEADER_SELECTOR) || node.matches('[data-testid="UserName"]');
+    return findHandle(node, isProfileIdentity ? profileHandle : undefined);
 }
 
 console.info('[ListLens:Content] Content script loaded.');
