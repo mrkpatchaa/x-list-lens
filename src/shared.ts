@@ -72,11 +72,12 @@ export function getMissingOperations(queryIds: QueryIds): RequiredOperation[] {
 }
 
 export async function getStoredQueryIds(): Promise<QueryIds> {
-    const keys = HARVESTED_OPERATIONS.map(queryIdStorageKey);
+    const keys = [...HARVESTED_OPERATIONS.map(queryIdStorageKey), 'queryIds'];
     const stored = await chrome.storage.local.get(keys);
+    const legacy = (stored.queryIds || {}) as QueryIds;
     const queryIds: QueryIds = {};
     for (const operation of HARVESTED_OPERATIONS) {
-        const value = stored[queryIdStorageKey(operation)];
+        const value = stored[queryIdStorageKey(operation)] ?? legacy[operation];
         if (isValidQueryId(value)) queryIds[operation] = value;
     }
     return queryIds;
@@ -112,10 +113,10 @@ export type SyncErrorCode =
 
 export type SyncState =
     | { status: 'idle' }
-    | { status: 'running'; runId: string; done: number; total: number; list?: string; cancelRequested?: boolean }
-    | { status: 'done'; at: number; listCount: number; peopleCount: number }
-    | { status: 'cancelled'; at: number }
-    | { status: 'error'; at: number; error: string; code: SyncErrorCode };
+    | { status: 'running'; runId?: string; done: number; total: number; list?: string; cancelRequested?: boolean }
+    | { status: 'done'; at?: number; listCount?: number; peopleCount?: number }
+    | { status: 'cancelled'; at?: number }
+    | { status: 'error'; at?: number; error: string; code?: SyncErrorCode };
 
 // chrome.storage.local.get() is typed as {} - narrow it once, here.
 export const getLocal = (keys: string[]) => chrome.storage.local.get(keys) as Promise<Record<string, any>>;
