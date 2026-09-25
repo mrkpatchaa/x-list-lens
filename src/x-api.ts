@@ -141,6 +141,21 @@ function readMemberHandle(entry: JsonRecord): string | undefined {
     return handle && isValidHandle(handle) ? handle.toLowerCase() : undefined;
 }
 
+function collectLegacyScreenNames(value: unknown, into: Set<string>, state = { count: 0 }): void {
+    if (state.count++ >= MAX_TRAVERSAL_NODES) return;
+    if (Array.isArray(value)) {
+        for (const item of value) collectLegacyScreenNames(item, into, state);
+        return;
+    }
+    if (!isRecord(value)) return;
+
+    const screenName = getString(value.screen_name);
+    if (screenName && isValidHandle(screenName)) into.add(screenName.toLowerCase());
+    for (const child of Object.values(value)) {
+        if (isRecord(child) || Array.isArray(child)) collectLegacyScreenNames(child, into, state);
+    }
+}
+
 export function parseMembersPage(payload: unknown): { handles: string[]; cursor: string } {
     const data = assertSuccessfulGraphQLPayload(payload, 'ListMembers');
     const instructions = findTimelineInstructions(data);
@@ -152,7 +167,8 @@ export function parseMembersPage(payload: unknown): { handles: string[]; cursor:
     let cursor = '';
     let unexpectedEntry = false;
 
-    for (const entry of timelineEntries(instructions)) {
+    const entries = timelineEntries(instructions);
+    for (const entry of entries) {
         const entryCursor = readCursor(entry);
         if (entryCursor) {
             cursor = entryCursor;
@@ -162,6 +178,10 @@ export function parseMembersPage(payload: unknown): { handles: string[]; cursor:
         const handle = readMemberHandle(entry);
         if (handle) handles.add(handle);
         else unexpectedEntry = true;
+    }
+
+    if (handles.size === 0 && unexpectedEntry) {
+        for (const entry of entries) collectLegacyScreenNames(entry, handles);
     }
 
     if (unexpectedEntry && handles.size === 0) {
@@ -207,6 +227,21 @@ function collectListsFromEntry(entry: JsonRecord, into: Map<string, ListSummary>
     visit(entry, ['entry'], { count: 0 });
 }
 
+function collectListsByLegacyShape(value: unknown, into: Map<string, ListSummary>, state = { count: 0 }): void {
+    if (state.count++ >= MAX_TRAVERSAL_NODES) return;
+    if (Array.isArray(value)) {
+        for (const item of value) collectListsByLegacyShape(item, into, state);
+        return;
+    }
+    if (!isRecord(value)) return;
+
+    const record = readListRecord(value);
+    if (record) into.set(record.id, record);
+    for (const child of Object.values(value)) {
+        if (isRecord(child) || Array.isArray(child)) collectListsByLegacyShape(child, into, state);
+    }
+}
+
 export function parseListsPage(payload: unknown): { lists: ListSummary[]; cursor: string } {
     const data = assertSuccessfulGraphQLPayload(payload, 'ListsManagementPageTimeline');
     const instructions = findTimelineInstructions(data);
@@ -216,10 +251,17 @@ export function parseListsPage(payload: unknown): { lists: ListSummary[]; cursor
 
     const lists = new Map<string, ListSummary>();
     let cursor = '';
-    for (const entry of timelineEntries(instructions)) {
+    const entries = timelineEntries(instructions);
+    for (const entry of entries) {
         const entryCursor = readCursor(entry);
         if (entryCursor) cursor = entryCursor;
         collectListsFromEntry(entry, lists);
+    }
+
+    // X has used several list envelope shapes. Keep the old bounded shape-based
+    // fallback for compatibility, but only when no list-specific path matched.
+    if (lists.size === 0) {
+        collectListsByLegacyShape(data, lists);
     }
 
     return { lists: [...lists.values()], cursor }

@@ -69,6 +69,19 @@ describe('parseMembersPage', () => {
         expect(page.cursor).toBe('NEXT_PAGE')
     })
 
+    it('supports legacy member result wrappers', () => {
+        const page = parseMembersPage(memberPayload([{
+            entryId: 'member-1',
+            content: {
+                itemContent: {
+                    user: { screen_name: 'Alice' },
+                },
+            },
+        }]))
+
+        expect(page.handles).toEqual(['alice'])
+    })
+
     it('rejects GraphQL errors instead of treating them as an empty list', () => {
         expect(() => parseMembersPage({ errors: [{ message: 'Unknown query' }] }))
             .toThrow(XApiError)
@@ -136,6 +149,28 @@ describe('parseListsPage', () => {
         }]))
 
         expect(page.lists).toEqual([{ id: '1', name: 'Design' }])
+    })
+
+    it('falls back to the known legacy list shape when wrappers change', () => {
+        const page = parseListsPage(listPayload([{
+            entryId: 'list-1',
+            content: {
+                itemContent: {
+                    unexpected_wrapper: { value: listRecord('1', 'Design') },
+                },
+            },
+        }]))
+
+        expect(page.lists).toEqual([{ id: '1', name: 'Design' }])
+    })
+
+    it('finds legacy list records outside timeline entries', () => {
+        const payload = listPayload([cursorEntry('END')]) as {
+            data: { legacy_list: ReturnType<typeof listRecord> }
+        }
+        payload.data.legacy_list = listRecord('1', 'Design')
+
+        expect(parseListsPage(payload).lists).toEqual([{ id: '1', name: 'Design' }])
     })
 
     it('accepts a validated timeline with no lists', () => {
