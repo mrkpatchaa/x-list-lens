@@ -34,7 +34,7 @@ const PAGE_DELAY_MIN_MS = 800;
 const PAGE_DELAY_JITTER_MS = 700;
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RETRIES = 3;
-const DIRTY_LIST_PREFIX = 'dirtyList:';
+const DIRTY_LISTS_KEY = 'dirtyListIds';
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const touchServiceWorker = () => chrome.storage.local.set({ syncHeartbeat: Date.now() });
@@ -243,11 +243,10 @@ async function syncSingleList(listId: string): Promise<boolean> {
 
 let dirtySyncTimer: ReturnType<typeof setTimeout> | undefined;
 let dirtyProcessorRunning = false;
+let dirtyWrites: Promise<void> = Promise.resolve();
 let fullSyncRunning = false;
 
-function dirtyListKey(listId: string): string {
-    return `${DIRTY_LIST_PREFIX}${listId}`;
-}
+type DirtyListIds = Record<string, number>;
 
 function scheduleDirtySync(delayMs = MUTATION_DEBOUNCE_MS): void {
     if (fullSyncRunning || dirtySyncTimer) return;
@@ -260,10 +259,30 @@ function scheduleDirtySync(delayMs = MUTATION_DEBOUNCE_MS): void {
 function queueListSync(listId: string): void {
     if (!isValidListId(listId)) return;
     const queuedAt = Date.now();
-    void chrome.storage.local
-        .set({ [dirtyListKey(listId)]: queuedAt })
-        .then(() => scheduleDirtySync())
-        .catch((error) => console.error('[ListLens:Background] Could not queue changed list', error));
+    const nextWrite = dirtyWrites.then(async () => {
+        const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
+        const current = (dirtyListIds || {}) as DirtyListIds;
+        await chrome.storage.local.set({ [DIRTY_LISTS_KEY]: { ...current, [listId]: queuedAt } });
+    });
+    dirtyWrites = nextWrite.catch((error) => {
+        console.error('[ListLens:Background] Could not queue changed list', error);
+    });
+    void nextWrite.then(() => scheduleDirtySync()).catch(() => {});
+}
+
+async function removeDirtyListIfUnchanged(listId: string, queuedAt: number): Promise<void> {
+    const nextWrite = dirtyWrites.then(async () => {
+        const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
+        const current = (dirtyListIds || {}) as DirtyListIds;
+        if (current[listId] !== queuedAt) return;
+        const remaining = { ...current };
+        delete remaining[listId];
+        await chrome.storage.local.set({ [DIRTY_LISTS_KEY]: remaining });
+    });
+    dirtyWrites = nextWrite.catch((error) => {
+        console.error('[ListLens:Background] Could not clear changed list', error);
+    });
+    await nextWrite;
 }
 
 async function processDirtySyncs(): Promise<void> {
@@ -271,24 +290,15 @@ async function processDirtySyncs(): Promise<void> {
     dirtyProcessorRunning = true;
 
     try {
-        const stored = await chrome.storage.local.get(null);
-        const dirtyLists = Object.entries(stored)
-            .filter(([key, queuedAt]) => key.startsWith(DIRTY_LIST_PREFIX) && typeof queuedAt === 'number')
-            .sort(([, a], [, b]) => Number(a) - Number(b));
+        const { dirtyListIds } = await getLocal([DIRTY_LISTS_KEY]);
+        const dirtyLists = Object.entries((dirtyListIds || {}) as DirtyListIds)
+            .filter(([listId, queuedAt]) => isValidListId(listId) && typeof queuedAt === 'number')
+            .sort(([, a], [, b]) => a - b);
 
-        for (const [key, queuedAt] of dirtyLists) {
+        for (const [listId, queuedAt] of dirtyLists) {
             if (fullSyncRunning) break;
-            const listId = key.slice(DIRTY_LIST_PREFIX.length);
-            if (!isValidListId(listId)) {
-                await chrome.storage.local.remove(key);
-                continue;
-            }
-
             const refreshed = await syncSingleList(listId);
-            if (!refreshed) continue;
-
-            const latest = await chrome.storage.local.get(key);
-            if (latest[key] === queuedAt) await chrome.storage.local.remove(key);
+            if (refreshed) await removeDirtyListIfUnchanged(listId, queuedAt);
         }
     } catch (error) {
         console.error('[ListLens:Background] Could not process changed lists', error);
