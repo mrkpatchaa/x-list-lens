@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 function installChromeMock(
-    queryIds: Record<string, string> = { 'queryId:ListsManagementPageTimeline': 'lists-query' },
+    queryIds: Record<string, string> = { 'queryId:ListOwnerships': 'ownership-query' },
     overrides: Record<string, unknown> = {},
 ) {
     const storage: Record<string, unknown> = {
@@ -58,7 +58,7 @@ describe('popup states', () => {
     it('shows list names and filters the list directory', async () => {
         vi.resetModules();
         installChromeMock({
-            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListOwnerships': 'ownership-query',
             'queryId:ListMembers': 'members-query',
         }, {
             listCache: { alice: ['1'], bob: ['1', '2'] },
@@ -86,7 +86,7 @@ describe('popup states', () => {
     it('enables syncing after both required queries are present', async () => {
         vi.resetModules();
         installChromeMock({
-            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListOwnerships': 'ownership-query',
             'queryId:ListMembers': 'members-query',
         });
         await import('./popup');

@@ -227,13 +227,17 @@ listsSearch.addEventListener('input', () => {
 function renderSetup(queryIds: QueryIds) {
     const missing = getMissingOperations(queryIds);
     const needsListMembers = missing.includes('ListMembers');
-    const needsLists = missing.includes('ListsManagementPageTimeline');
+    const needsLists = missing.includes('ListOwnerships');
 
     setupEyebrow.textContent = missing.length === 2 ? 'One-time setup' : 'Almost there';
-    setupTitle.textContent = needsListMembers ? 'Open one of your lists' : 'Connect to your Lists';
-    setupCopy.textContent = needsListMembers
-        ? 'Open any list from your Lists page so ListLens can learn the member request.'
-        : 'Open your Lists on X once so ListLens can learn the current request format.';
+    setupTitle.textContent = missing.length === 2
+        ? 'Connect to your Lists'
+        : needsListMembers ? 'Open one of your lists' : 'Open your Lists tab';
+    setupCopy.textContent = missing.length === 2
+        ? 'Open your own profile’s Lists tab, then open one of your lists so ListLens can learn both requests.'
+        : needsListMembers
+            ? 'Open any list from your Lists page so ListLens can learn the member request.'
+            : 'Open your own profile’s Lists tab so ListLens can learn the ownership request.';
     openListsBtn.textContent = 'Open Lists on X';
 
     setupListsStep.className = needsLists

@@ -9,8 +9,8 @@ import {
     type UserHandleIndex,
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
-import { getUserIdFromListPayload, getUserIdFromTwid, isOwnedListRecord } from './list-filter';
-import { hasTimelineInstructions } from './list-response';
+import { getUserIdFromTwid } from './list-filter';
+import { parseOwnedListsPage, type OwnedListSummary } from './list-ownership';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -33,16 +33,19 @@ async function getCsrfToken(): Promise<string> {
     return cookie.value;
 }
 
-async function getCurrentUserId(payload?: unknown): Promise<string | undefined> {
+async function getCurrentUserId(): Promise<string | undefined> {
     const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'twid' });
-    return (cookie?.value && getUserIdFromTwid(cookie.value)) || getUserIdFromListPayload(payload);
+    return cookie?.value ? getUserIdFromTwid(cookie.value) : undefined;
 }
 
 async function getDynamicQueryId(operationName: string): Promise<string> {
     const queryIds = await getStoredQueryIds();
     const queryId = queryIds[operationName as keyof typeof queryIds];
     if (!queryId) {
-        throw new Error(`Please click into one of your lists on X so we can harvest the ${operationName} query ID!`);
+        const hint = operationName === 'ListOwnerships'
+            ? 'Open your own profile’s Lists tab on X so we can harvest the ownership request.'
+            : 'Open one of your lists on X so we can harvest the member request.';
+        throw new Error(`${hint} (${operationName})`);
     }
     return queryId;
 }
@@ -197,22 +200,36 @@ async function applyListMutation(payload: {
 // ---------------------------------------------------------
 // MAIN FULL SYNC
 // ---------------------------------------------------------
-function extractLists(
-    obj: any,
-    currentUserId?: string,
-    into: { id: string; name: string }[] = [],
-): { id: string; name: string }[] {
-    if (!obj || typeof obj !== 'object') return into;
-    if (
-        obj.id_str
-        && obj.name
-        && (obj.member_count !== undefined || obj.mode !== undefined)
-        && isOwnedListRecord(obj, currentUserId)
-    ) {
-        into.push({ id: obj.id_str, name: obj.name });
+async function fetchOwnedLists(
+    ownershipsQueryId: string,
+    currentUserId: string,
+    csrfToken: string,
+    cancelled: () => boolean = () => false,
+): Promise<OwnedListSummary[]> {
+    const lists = new Map<string, OwnedListSummary>();
+    const seenCursors = new Set<string>();
+    let cursor = '';
+
+    while (true) {
+        const variables = JSON.stringify({
+            userId: currentUserId,
+            count: PAGE_SIZE,
+            ...(cursor ? { cursor } : {}),
+        });
+        const url = `https://x.com/i/api/graphql/${ownershipsQueryId}/ListOwnerships?variables=${encodeURIComponent(variables)}`;
+        const page = parseOwnedListsPage(await fetchWithAuth(url, csrfToken), currentUserId);
+
+        for (const list of page.lists) lists.set(list.id, list);
+
+        if (cancelled()) break;
+        if (!page.cursor || page.cursor === cursor || seenCursors.has(page.cursor)) break;
+        seenCursors.add(page.cursor);
+        cursor = page.cursor;
+
+        await delay(Math.floor(Math.random() * 700) + 800);
     }
-    for (const key of Object.keys(obj)) extractLists(obj[key], currentUserId, into);
-    return into;
+
+    return [...lists.values()];
 }
 
 let fullSyncRunning = false;
@@ -227,14 +244,19 @@ async function syncLists() {
         await setSyncState({ status: 'running', done: 0, total: 0 });
 
         const csrfToken = await getCsrfToken();
-        const listsQueryId = await getDynamicQueryId('ListsManagementPageTimeline');
+        const ownershipsQueryId = await getDynamicQueryId('ListOwnerships');
         const membersQueryId = await getDynamicQueryId('ListMembers');
+        const currentUserId = await getCurrentUserId();
+        if (!currentUserId) {
+            throw new Error('Could not determine the signed-in X user ID. Sign in to X and try again.');
+        }
 
-        const listsUrl = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent('{"count":100}')}`;
-        const listPayload = await fetchWithAuth(listsUrl, csrfToken);
-        const currentUserId = await getCurrentUserId(listPayload);
-        if (!hasTimelineInstructions(listPayload)) throw new Error('Could not parse list structures from JSON.');
-        const lists = extractLists(listPayload, currentUserId);
+        const lists = await fetchOwnedLists(
+            ownershipsQueryId,
+            currentUserId,
+            csrfToken,
+            () => cancelRequested,
+        );
 
         const listMeta: ListMeta = {};
         for (const list of lists) listMeta[list.id] = list.name;

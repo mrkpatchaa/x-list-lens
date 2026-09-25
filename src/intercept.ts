@@ -9,7 +9,7 @@ import type { MSG } from './shared';
 const QUERY_HARVESTED: typeof MSG.QUERY_HARVESTED = 'X_QUERY_HARVESTED';
 const LIST_MUTATION: typeof MSG.LIST_MUTATION = 'X_LIST_MUTATION';
 
-const HARVEST_OPERATIONS = ['ListsManagementPageTimeline', 'ListMembers', 'ListAddMember', 'ListRemoveMember'];
+const HARVEST_OPERATIONS = ['ListOwnerships', 'ListsManagementPageTimeline', 'ListMembers', 'ListAddMember', 'ListRemoveMember'];
 const GRAPHQL_RE = /\/i\/api\/graphql\/([^/]+)\/([A-Za-z0-9_]+)/;
 const QUERY_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const ID_RE = /^\d{1,32}$/;

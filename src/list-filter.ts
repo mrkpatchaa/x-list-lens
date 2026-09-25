@@ -1,5 +1,15 @@
 export function getUserIdFromTwid(value: string): string | undefined {
-    const match = decodeURIComponent(value).match(/(?:^|;)u=(\d{1,32})(?:[|;]|$)/);
+    let decoded = value;
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            const next = decodeURIComponent(decoded);
+            if (next === decoded) break;
+            decoded = next;
+        } catch {
+            break;
+        }
+    }
+    const match = decoded.match(/(?:^|;)u=(\d{1,32})(?:[|;]|$)/);
     return match?.[1];
 }
 
@@ -31,7 +41,11 @@ export function getUserIdFromListPayload(payload: unknown): string | undefined {
     return undefined;
 }
 
-export function isOwnedListRecord(record: unknown, currentUserId?: string): boolean {
+export function isOwnedListRecord(
+    record: unknown,
+    currentUserId?: string,
+    requireExplicitOwnership = false,
+): boolean {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
     const value = record as Record<string, unknown>;
 
@@ -42,7 +56,6 @@ export function isOwnedListRecord(record: unknown, currentUserId?: string): bool
         || value.is_owned_by_viewer === false
     ) return false;
     if (value.owned === true || value.owned_by_viewer === true || value.is_owned_by_viewer === true) return true;
-    if (!currentUserId) return true;
 
     const owner = value.owner && typeof value.owner === 'object' && !Array.isArray(value.owner)
         ? value.owner as Record<string, unknown>
@@ -54,6 +67,7 @@ export function isOwnedListRecord(record: unknown, currentUserId?: string): bool
         ?? owner?.id_str
         ?? owner?.rest_id;
 
-    if (ownerId !== undefined) return String(ownerId) === currentUserId;
+    if (ownerId !== undefined) return Boolean(currentUserId) && String(ownerId) === currentUserId;
+    if (requireExplicitOwnership) return false;
     return true;
 }

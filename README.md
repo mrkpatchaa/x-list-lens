@@ -12,7 +12,7 @@ X has no public API for reading your Lists, so ListLens reads them the same way 
 
 Those endpoints are versioned by an opaque query ID that changes whenever X ships a new build, so the IDs can’t be hardcoded. Instead, the extension watches X make the calls itself and learns the current IDs. That is why there is a one-time setup step.
 
-Four pieces run in separate extension contexts:
+Five pieces run in separate extension contexts:
 
 | File | Context | Job |
 |---|---|---|
@@ -20,14 +20,14 @@ Four pieces run in separate extension contexts:
 | `src/content.ts` | content script | Validates the page bridge and paints accessible badges |
 | `src/background.ts` | service worker | Calls X’s API, paginates safely, coordinates sync work, and commits the local cache |
 | `src/popup.ts` | popup | Setup guidance, progress, recovery, and sync status |
-| `src/x-api.ts` | shared parser | Strictly validates GraphQL responses before they can affect the cache |
+| `src/list-ownership.ts` | shared parser | Reads the dedicated `ListOwnerships` response and rejects non-owned records |
 | `src/shared.ts` | all extension contexts | Message names, storage keys, and persisted types |
 
 `intercept.ts` deliberately has **no runtime imports**. A content script with imports gets wrapped in an async dynamic-import loader, which would leave `window.fetch` unpatched during early page load. It uses a type-only import so the build still fails if the message names drift.
 
 ### Syncing
 
-- **Full sync** — triggered from the popup. Walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
+- **Full sync** — triggered from the popup. Reads the signed-in user’s lists from X’s dedicated `ListOwnerships` operation (not the combined Lists/discovery timeline), then walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
 - **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor confirms the mutation and the service worker applies a local membership delta instead of re-reading the list. A small `userId → handle` index is learned during full sync. If a changed account is not in that index, the extension asks for a manual full sync rather than silently walking a large list.
 - **Durable recovery** — changed-list work is persisted, and an interrupted service-worker sync is reported as interrupted instead of leaving the popup stuck on “Running.” The previous cache remains available.
 - **Safe cancellation** — cancellation is persisted while a sync is running. Stopping leaves the previous cache intact.
@@ -62,10 +62,10 @@ For development with hot reload, use `npm run dev` instead of `npm run build`.
 
 The extension needs to observe two different X requests before it can sync:
 
-1. Open your Lists page.
-2. Open any one list from that page.
+1. Open your own profile’s **Lists** tab so ListLens can learn the `ListOwnerships` request.
+2. Open any one of your lists so ListLens can learn the `ListMembers` request.
 
-The popup shows which setup step is still missing. If X changes its internal request format, the popup preserves the previous cache and offers a Reconnect action instead of silently replacing your badges.
+The popup shows which setup step is still missing. If X changes its internal request format, the popup preserves the previous cache and offers a Reconnect action instead of silently replacing your badges. After upgrading from the older combined-timeline sync, run one successful full sync to replace any previously cached recommendation lists.
 
 After setup, hit **Sync lists**. A full sync can take a few minutes for large lists; progress and the list currently being read are shown, and you can stop it at any point.
 
@@ -97,6 +97,7 @@ src/
   shared.ts       messages, validation, and persisted types
   sync-state.ts   sync state transitions
   x-api.ts        strict X response parsers and cache helpers
+  list-ownership.ts dedicated owned-list response parser
   badge.css       injected badge + tooltip styles
   index.css       Tailwind entry for the popup
 index.html        popup markup

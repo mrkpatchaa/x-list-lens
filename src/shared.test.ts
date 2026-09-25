@@ -13,6 +13,10 @@ describe('page message validation', () => {
     it('accepts an allowlisted harvested query', () => {
         expect(isQueryHarvestedMessage({
             type: MSG.QUERY_HARVESTED,
+            payload: { operationName: 'ListOwnerships', queryId: 'abc123_-' },
+        })).toBe(true)
+        expect(isQueryHarvestedMessage({
+            type: MSG.QUERY_HARVESTED,
             payload: { operationName: 'ListMembers', queryId: 'abc123_-' },
         })).toBe(true)
     })
@@ -65,9 +69,9 @@ describe('setup state', () => {
 
     it('reports the exact missing operations in order', () => {
         expect(getMissingOperations({ ListMembers: 'abc123' }))
-            .toEqual(['ListsManagementPageTimeline'])
+            .toEqual(['ListOwnerships'])
         expect(getMissingOperations({})).toEqual([
-            'ListsManagementPageTimeline',
+            'ListOwnerships',
             'ListMembers',
         ])
     })

@@ -4,6 +4,7 @@ import { getUserIdFromListPayload, getUserIdFromTwid, isOwnedListRecord } from '
 describe('getUserIdFromTwid', () => {
     it('reads the user ID from the encoded twid cookie format', () => {
         expect(getUserIdFromTwid('u%3D200451873%7Ccookie-suffix')).toBe('200451873')
+        expect(getUserIdFromTwid('u%253D200451873%257Ccookie-suffix')).toBe('200451873')
         expect(getUserIdFromTwid('u%3D200451873')).toBe('200451873')
     })
 })
@@ -23,6 +24,11 @@ describe('isOwnedListRecord', () => {
 
     it('keeps records owned by the signed-in user', () => {
         expect(isOwnedListRecord({ id_str: '1', owner: { rest_id: '42' } }, '42')).toBe(true)
+    })
+
+    it('can require explicit ownership evidence for dedicated endpoints', () => {
+        expect(isOwnedListRecord({ id_str: '1', name: 'Design' }, '42', true)).toBe(false)
+        expect(isOwnedListRecord({ id_str: '1', name: 'Design', owner_id_str: '42' }, '42', true)).toBe(true)
     })
 
     it('rejects records owned by another user when ownership is explicit', () => {
