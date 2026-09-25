@@ -177,21 +177,31 @@ function readListRecord(value: unknown): ListSummary | undefined {
     return { id, name };
 }
 
+function isListPathKey(key: string): boolean {
+    return /list/i.test(key);
+}
+
 function collectListsFromEntry(entry: JsonRecord, into: Map<string, ListSummary>): void {
-    const itemContent = readPath(entry, ['content', 'itemContent']);
-    if (!isRecord(itemContent)) return;
+    const visit = (value: unknown, path: string[], state: { count: number }): void => {
+        if (state.count++ >= MAX_TRAVERSAL_NODES) return;
+        if (Array.isArray(value)) {
+            for (const item of value) visit(item, path, state);
+            return;
+        }
+        if (!isRecord(value)) return;
 
-    // Only these list-specific result paths are accepted. Recursing through the
-    // whole entry would mistake embedded owners and users for lists.
-    for (const key of ['list_results', 'list_result']) {
-        const resultContainer = itemContent[key];
-        if (!isRecord(resultContainer)) continue;
-        const record = readListRecord(resultContainer.result);
-        if (record) into.set(record.id, record);
-    }
+        const listContext = path.some(isListPathKey);
+        const record = readListRecord(value);
+        if (listContext && record) into.set(record.id, record);
 
-    const directList = readListRecord(itemContent.list);
-    if (directList) into.set(directList.id, directList);
+        for (const [key, child] of Object.entries(value)) {
+            if (isRecord(child) || Array.isArray(child)) visit(child, [...path, key], state);
+        }
+    };
+
+    // Only records below list-specific path keys are accepted. This supports
+    // X's occasional wrapper changes without mistaking embedded users for lists.
+    visit(entry, ['entry'], { count: 0 });
 }
 
 export function parseListsPage(payload: unknown): { lists: ListSummary[]; cursor: string } {

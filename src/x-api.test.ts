@@ -114,6 +114,21 @@ describe('parseListsPage', () => {
         expect(page.lists).toEqual([{ id: '1', name: 'Design' }])
     })
 
+    it('supports list records nested under a list-specific wrapper', () => {
+        const page = parseListsPage(listPayload([{
+            entryId: 'list-1',
+            content: {
+                itemContent: {
+                    list_management: {
+                        result: { ...listRecord('1', 'Design'), member_count: 4 },
+                    },
+                },
+            },
+        }]))
+
+        expect(page.lists).toEqual([{ id: '1', name: 'Design' }])
+    })
+
     it('accepts a validated timeline with no lists', () => {
         expect(parseListsPage(listPayload([cursorEntry('END')]))).toEqual({ lists: [], cursor: 'END' })
     })

@@ -399,6 +399,7 @@ async function syncLists(): Promise<void> {
             createDoneState({ lists: lists.length, people: Object.keys(localCache).length }),
         );
     } catch (error) {
+        console.error('[ListLens:Background] Full sync failed', error);
         await setSyncState(createErrorState(error));
     } finally {
         fullSyncRunning = false;
