@@ -291,7 +291,7 @@ async function removeDirtyListIfUnchanged(listId: string, queuedAt: number): Pro
 
 function processDirtySyncs(): Promise<void> {
     if (dirtyProcessorRunning) return dirtyProcessorPromise || Promise.resolve();
-    if (fullSyncRunning) return Promise.resolve();
+    if (fullSyncRunning || fullSyncStarting) return Promise.resolve();
 
     dirtyProcessorRunning = true;
     const revisionAtStart = dirtyRevision;
@@ -350,9 +350,10 @@ async function syncLists(): Promise<void> {
 
     try {
         await setSyncState({ status: 'running', runId, done: 0, total: 0 });
-        // Finish any already-queued targeted work before taking a full snapshot.
-        // This prevents a full commit from overwriting a newer targeted result.
-        await processDirtySyncs();
+        // Prevent a queued targeted refresh from starting a second visible phase.
+        // If one is already in flight, wait for it before taking the full snapshot.
+        fullSyncRunning = true;
+        if (dirtyProcessorRunning && dirtyProcessorPromise) await dirtyProcessorPromise;
         if (await isCurrentRunCancelled(runId)) {
             await setSyncState({ status: 'cancelled', at: Date.now() });
             return;
