@@ -1,3 +1,8 @@
+export function getUserIdFromTwid(value: string): string | undefined {
+    const match = decodeURIComponent(value).match(/(?:^|;)u=(\d{1,32})(?:[|;]|$)/);
+    return match?.[1];
+}
+
 export function isOwnedListRecord(record: unknown, currentUserId?: string): boolean {
     if (!record || typeof record !== 'object' || Array.isArray(record)) return false;
     if (!currentUserId) return true;

@@ -9,7 +9,7 @@ import {
     type UserHandleIndex,
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
-import { isOwnedListRecord } from './list-filter';
+import { getUserIdFromTwid, isOwnedListRecord } from './list-filter';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -35,8 +35,7 @@ async function getCsrfToken(): Promise<string> {
 async function getCurrentUserId(): Promise<string | undefined> {
     const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'twid' });
     if (!cookie?.value) return undefined;
-    const match = decodeURIComponent(cookie.value).match(/(?:^|;)u=(\d{1,32})(?:;|$)/);
-    return match?.[1];
+    return getUserIdFromTwid(cookie.value);
 }
 
 async function getDynamicQueryId(operationName: string): Promise<string> {

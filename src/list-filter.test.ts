@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { isOwnedListRecord } from './list-filter'
+import { getUserIdFromTwid, isOwnedListRecord } from './list-filter'
+
+describe('getUserIdFromTwid', () => {
+    it('reads the user ID from the encoded twid cookie format', () => {
+        expect(getUserIdFromTwid('u%3D200451873%7Ccookie-suffix')).toBe('200451873')
+        expect(getUserIdFromTwid('u%3D200451873')).toBe('200451873')
+    })
+})
 
 describe('isOwnedListRecord', () => {
     it('rejects records explicitly marked as recommendations', () => {
