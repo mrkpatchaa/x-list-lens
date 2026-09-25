@@ -1,5 +1,5 @@
 import './badge.css';
-import { findHandle, formatListNames } from './dom-badge';
+import { BADGE_TARGET_SELECTOR, findHandle, formatListNames } from './dom-badge';
 import {
     MSG,
     getLocal,
@@ -14,7 +14,7 @@ let listCache: ListCache = {};
 let listMeta: ListMeta = {};
 
 // UserCell covers list-member pages, followers, search results and "who to follow".
-const TARGET_SELECTOR = '[data-testid="tweet"], [data-testid="UserName"], [data-testid="UserCell"]';
+const TARGET_SELECTOR = BADGE_TARGET_SELECTOR;
 const HANDLE_ATTR = 'data-listlens-handle';
 const BADGE_CLASS = 'listlens-badge';
 const TIP_CLASS = 'listlens-tip';

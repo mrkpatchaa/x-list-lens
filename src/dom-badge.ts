@@ -4,6 +4,8 @@ export type FoundHandle = {
     link: HTMLAnchorElement;
 }
 
+export const BADGE_TARGET_SELECTOR = '[data-testid="tweet"], [data-testid="UserName"], [data-testid="UserCell"], [data-testid="UserProfileHeader_Items"]';
+
 const HANDLE_RE = /^@[A-Za-z0-9_]{1,15}$/;
 
 function profileHandleFromHref(href: string | null): string | undefined {
