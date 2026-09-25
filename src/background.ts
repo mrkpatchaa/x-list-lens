@@ -9,6 +9,7 @@ import {
     type UserHandleIndex,
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
+import { isOwnedListRecord } from './list-filter';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -29,6 +30,13 @@ async function getCsrfToken(): Promise<string> {
     const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'ct0' });
     if (!cookie?.value) throw new Error('Not logged into X');
     return cookie.value;
+}
+
+async function getCurrentUserId(): Promise<string | undefined> {
+    const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'twid' });
+    if (!cookie?.value) return undefined;
+    const match = decodeURIComponent(cookie.value).match(/(?:^|;)u=(\d{1,32})(?:;|$)/);
+    return match?.[1];
 }
 
 async function getDynamicQueryId(operationName: string): Promise<string> {
@@ -190,12 +198,21 @@ async function applyListMutation(payload: {
 // ---------------------------------------------------------
 // MAIN FULL SYNC
 // ---------------------------------------------------------
-function extractLists(obj: any, into: { id: string; name: string }[] = []): { id: string; name: string }[] {
+function extractLists(
+    obj: any,
+    currentUserId?: string,
+    into: { id: string; name: string }[] = [],
+): { id: string; name: string }[] {
     if (!obj || typeof obj !== 'object') return into;
-    if (obj.id_str && obj.name && (obj.member_count !== undefined || obj.mode !== undefined)) {
+    if (
+        obj.id_str
+        && obj.name
+        && (obj.member_count !== undefined || obj.mode !== undefined)
+        && isOwnedListRecord(obj, currentUserId)
+    ) {
         into.push({ id: obj.id_str, name: obj.name });
     }
-    for (const key of Object.keys(obj)) extractLists(obj[key], into);
+    for (const key of Object.keys(obj)) extractLists(obj[key], currentUserId, into);
     return into;
 }
 
@@ -215,7 +232,8 @@ async function syncLists() {
         const membersQueryId = await getDynamicQueryId('ListMembers');
 
         const listsUrl = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent('{"count":100}')}`;
-        const lists = extractLists(await fetchWithAuth(listsUrl, csrfToken));
+        const currentUserId = await getCurrentUserId();
+        const lists = extractLists(await fetchWithAuth(listsUrl, csrfToken), currentUserId);
         if (lists.length === 0) throw new Error('Could not parse list structures from JSON.');
 
         const listMeta: ListMeta = {};
