@@ -9,10 +9,22 @@ describe('applyMembershipDelta', () => {
         })
     })
 
-    it('removes only the affected list membership', () => {
-        expect(applyMembershipDelta({ alice: ['1', '2'], bob: ['2'] }, '2', 'alice', 'remove')).toEqual({
+    it('removes only the targeted account from the affected list', () => {
+        expect(applyMembershipDelta({
+            alice: ['1', '2'],
+            bob: ['1', '2'],
+            carol: ['1'],
+        }, '2', 'alice', 'remove')).toEqual({
             alice: ['1'],
+            bob: ['1', '2'],
+            carol: ['1'],
         })
+    })
+
+    it('does not mutate an existing account list when adding', () => {
+        const cache = { alice: ['1'] }
+        expect(applyMembershipDelta(cache, '2', 'alice', 'add')).toEqual({ alice: ['1', '2'] })
+        expect(cache).toEqual({ alice: ['1'] })
     })
 
     it('does not mutate the previous cache', () => {
