@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { MSG } from './shared'
 
 function installChromeMock(
-    queryIds: Record<string, string> = { 'queryId:ListOwnerships': 'ownership-query' },
+    queryIds: Record<string, string> = { 'queryId:ListsManagementPageTimeline': 'lists-query' },
     overrides: Record<string, unknown> = {},
 ) {
     const storage: Record<string, unknown> = {
@@ -58,7 +59,7 @@ describe('popup states', () => {
     it('shows list names and filters the list directory', async () => {
         vi.resetModules();
         installChromeMock({
-            'queryId:ListOwnerships': 'ownership-query',
+            'queryId:ListsManagementPageTimeline': 'lists-query',
             'queryId:ListMembers': 'members-query',
         }, {
             listCache: { alice: ['1'], bob: ['1', '2'] },
@@ -83,10 +84,30 @@ describe('popup states', () => {
         expect(document.getElementById('listsList')?.textContent).not.toContain('Design');
     });
 
+    it('sends a cancellation request while a sync is running', async () => {
+        vi.resetModules();
+        const chromeMock = installChromeMock({
+            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListMembers': 'members-query',
+        }, {
+            syncState: { status: 'running', done: 1, total: 3, list: 'Design' },
+        });
+        await import('./popup');
+        await vi.waitFor(() => expect(document.getElementById('cancelBtn')?.classList.contains('hidden')).toBe(false));
+
+        const cancel = document.getElementById('cancelBtn') as HTMLButtonElement;
+        expect(cancel.disabled).toBe(false);
+        cancel.click();
+
+        await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: MSG.CANCEL_SYNC }));
+        expect(document.getElementById('progressLabel')?.textContent).toBe('Stopping…');
+        expect(cancel.disabled).toBe(true);
+    })
+
     it('enables syncing after both required queries are present', async () => {
         vi.resetModules();
         installChromeMock({
-            'queryId:ListOwnerships': 'ownership-query',
+            'queryId:ListsManagementPageTimeline': 'lists-query',
             'queryId:ListMembers': 'members-query',
         });
         await import('./popup');

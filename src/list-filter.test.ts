@@ -31,8 +31,15 @@ describe('isOwnedListRecord', () => {
         expect(isOwnedListRecord({ id_str: '1', name: 'Design', owner_id_str: '42' }, '42', true)).toBe(true)
     })
 
-    it('rejects records owned by another user when ownership is explicit', () => {
-        expect(isOwnedListRecord({ id_str: '1', owner: { rest_id: '99' } }, '42')).toBe(false)
+    it('rejects records whose nested owner is another user', () => {
+        expect(isOwnedListRecord({ id_str: '1', user_results: { result: { rest_id: '99' } } }, '42')).toBe(false)
+        expect(isOwnedListRecord({ id_str: '1', owner_results: { result: { id_str: '99' } } }, '42')).toBe(false)
+        expect(isOwnedListRecord({ id_str: '1', user: { result: { legacy: { id_str: '99' } } } }, '42')).toBe(false)
+    })
+
+    it('keeps records whose nested owner is the signed-in user', () => {
+        expect(isOwnedListRecord({ id_str: '1', user_results: { result: { rest_id: '42' } } }, '42')).toBe(true)
+        expect(isOwnedListRecord({ id_str: '1', owner_results: { result: { rest_id: '42' } } }, '42')).toBe(true)
     })
 
     it('rejects explicit non-owned records even without a cookie user ID', () => {

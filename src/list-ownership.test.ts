@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildListOwnershipsVariables, parseOwnedListsPage } from './list-ownership'
+import { buildListOwnershipsVariables, parseListManagementPage, parseOwnedListsPage } from './list-ownership'
 
 const listRecord = (id: string, name: string, ownerId = '42') => ({
     id_str: id,
@@ -51,7 +51,55 @@ const timelineOwnershipPayload = (entries: unknown[]) => ({
     },
 })
 
+const managementPayload = (entries: unknown[]) => ({
+    data: {
+        list_management: {
+            timeline: {
+                timeline: {
+                    instructions: [
+                        { type: 'TimelineAddEntries', entries },
+                    ],
+                },
+            },
+        },
+    },
+})
+
 describe('parseOwnedListsPage', () => {
+    it('filters nested owners from the combined management response', () => {
+        expect(parseListManagementPage(managementPayload([
+            {
+                entryId: 'list-1',
+                content: {
+                    itemContent: {
+                        list: {
+                            id_str: '1',
+                            name: 'Mine',
+                            member_count: 2,
+                            user_results: { result: { rest_id: '42' } },
+                        },
+                    },
+                },
+            },
+            {
+                entryId: 'list-2',
+                content: {
+                    itemContent: {
+                        list: {
+                            id_str: '2',
+                            name: 'Recommendation',
+                            member_count: 3,
+                            user_results: { result: { rest_id: '99' } },
+                        },
+                    },
+                },
+            },
+        ]), '42')).toEqual({
+            lists: [{ id: '1', name: 'Mine' }],
+            cursor: '',
+        })
+    })
+
     it('keeps only lists owned by the current user and exposes the cursor', () => {
         expect(parseOwnedListsPage(ownershipPayload([
             listRecord('1', 'Mine'),
@@ -70,6 +118,27 @@ describe('parseOwnedListsPage', () => {
                 content: {
                     itemContent: {
                         list: { id_str: '1', name: 'Mine', is_member: true },
+                    },
+                },
+            },
+        ]), '42')).toEqual({
+            lists: [{ id: '1', name: 'Mine' }],
+            cursor: '',
+        })
+    })
+
+    it('accepts list metadata variants used by the management response', () => {
+        expect(parseListManagementPage(managementPayload([
+            {
+                entryId: 'list-1',
+                content: {
+                    itemContent: {
+                        list: {
+                            rest_id: '1',
+                            name: 'Mine',
+                            subscriber_count: 4,
+                            user_results: { result: { rest_id: '42' } },
+                        },
                     },
                 },
             },

@@ -9,10 +9,10 @@ export const MSG = {
     CANCEL_SYNC: 'CANCEL_SYNC',
 } as const;
 
-export const REQUIRED_OPERATIONS = ['ListOwnerships', 'ListMembers'] as const;
+export const REQUIRED_OPERATIONS = ['ListsManagementPageTimeline', 'ListMembers'] as const;
 export const HARVESTED_OPERATIONS = [
     ...REQUIRED_OPERATIONS,
-    'ListsManagementPageTimeline',
+    'ListOwnerships',
     'ListAddMember',
     'ListRemoveMember',
 ] as const;

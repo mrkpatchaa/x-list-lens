@@ -20,14 +20,14 @@ Five pieces run in separate extension contexts:
 | `src/content.ts` | content script | Validates the page bridge and paints accessible badges |
 | `src/background.ts` | service worker | Calls X’s API, paginates safely, coordinates sync work, and commits the local cache |
 | `src/popup.ts` | popup | Setup guidance, progress, recovery, and sync status |
-| `src/list-ownership.ts` | shared parser | Reads the dedicated `ListOwnerships` response and rejects non-owned records |
+| `src/list-ownership.ts` | shared parser | Reads Lists management/ownership responses and rejects non-owned records |
 | `src/shared.ts` | all extension contexts | Message names, storage keys, and persisted types |
 
 `intercept.ts` deliberately has **no runtime imports**. A content script with imports gets wrapped in an async dynamic-import loader, which would leave `window.fetch` unpatched during early page load. It uses a type-only import so the build still fails if the message names drift.
 
 ### Syncing
 
-- **Full sync** — triggered from the popup. Reads the signed-in user’s lists from X’s dedicated `ListOwnerships` operation (not the combined Lists/discovery timeline), then walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
+- **Full sync** — triggered from the popup. Reads the signed-in user’s lists from X’s `ListsManagementPageTimeline` response, filters records by both flat and nested owner IDs, and falls back to `ListOwnerships` only if that response is unusable. It then walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
 - **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor confirms the mutation and the service worker applies a local membership delta instead of re-reading the list. A small `userId → handle` index is learned during full sync. If a changed account is not in that index, the extension asks for a manual full sync rather than silently walking a large list.
 - **Durable recovery** — changed-list work is persisted, and an interrupted service-worker sync is reported as interrupted instead of leaving the popup stuck on “Running.” The previous cache remains available.
 - **Safe cancellation** — cancellation is persisted while a sync is running. Stopping leaves the previous cache intact.
@@ -62,7 +62,7 @@ For development with hot reload, use `npm run dev` instead of `npm run build`.
 
 The extension needs to observe two different X requests before it can sync:
 
-1. Open your own profile’s **Lists** tab so ListLens can learn the `ListOwnerships` request.
+1. Open your **Lists** page so ListLens can learn the `ListsManagementPageTimeline` request.
 2. Open any one of your lists so ListLens can learn the `ListMembers` request.
 
 The popup shows which setup step is still missing. If X changes its internal request format, the popup preserves the previous cache and offers a Reconnect action instead of silently replacing your badges. After upgrading from the older combined-timeline sync, run one successful full sync to replace any previously cached recommendation lists.
@@ -97,7 +97,8 @@ src/
   shared.ts       messages, validation, and persisted types
   sync-state.ts   sync state transitions
   x-api.ts        strict X response parsers and cache helpers
-  list-ownership.ts dedicated owned-list response parser
+  list-ownership.ts owned-list response parser
+  abortable.ts    abortable waits and cancellation helpers
   badge.css       injected badge + tooltip styles
   index.css       Tailwind entry for the popup
 index.html        popup markup

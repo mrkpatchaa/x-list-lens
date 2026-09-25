@@ -10,7 +10,13 @@ import {
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
 import { getUserIdFromTwid } from './list-filter';
-import { buildListOwnershipsVariables, parseOwnedListsPage, type OwnedListSummary } from './list-ownership';
+import {
+    buildListOwnershipsVariables,
+    parseListManagementPage,
+    parseOwnedListsPage,
+    type OwnedListSummary,
+} from './list-ownership';
+import { createAbortError, waitWithAbort } from './abortable';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -21,7 +27,7 @@ const INTER_LIST_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_RETRIES = 3;
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const delay = (ms: number, signal?: AbortSignal) => waitWithAbort(ms, signal);
 
 // The popup reads status from storage, so it stays correct even if it was closed
 // while a sync was running.
@@ -42,9 +48,11 @@ async function getDynamicQueryId(operationName: string): Promise<string> {
     const queryIds = await getStoredQueryIds();
     const queryId = queryIds[operationName as keyof typeof queryIds];
     if (!queryId) {
-        const hint = operationName === 'ListOwnerships'
-            ? 'Open your own profile’s Lists tab on X so we can harvest the ownership request.'
-            : 'Open one of your lists on X so we can harvest the member request.';
+        const hint = operationName === 'ListsManagementPageTimeline'
+            ? 'Open your Lists page on X so ListLens can harvest the list request.'
+            : operationName === 'ListOwnerships'
+                ? 'Open your own profile’s Lists tab on X so we can harvest the ownership request.'
+                : 'Open one of your lists on X so we can harvest the member request.';
         throw new Error(`${hint} (${operationName})`);
     }
     return queryId;
@@ -52,12 +60,24 @@ async function getDynamicQueryId(operationName: string): Promise<string> {
 
 // A single 429 used to abort the whole sync and throw away every list already
 // fetched. Back off and retry transient failures instead.
-async function fetchWithAuth(url: string, csrfToken: string, attempt = 0): Promise<any> {
+async function fetchWithAuth(
+    url: string,
+    csrfToken: string,
+    attempt = 0,
+    signal?: AbortSignal,
+): Promise<any> {
+    if (signal?.aborted) throw createAbortError();
+
+    const requestController = new AbortController();
+    const onExternalAbort = () => requestController.abort();
+    signal?.addEventListener('abort', onExternalAbort, { once: true });
+    const timeoutId = setTimeout(() => requestController.abort(), REQUEST_TIMEOUT_MS);
+
     let response: Response;
     try {
         response = await fetch(url, {
             credentials: 'include', // the service worker's origin differs from x.com, so cookies need opting in
-            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+            signal: requestController.signal,
             headers: {
                 'Authorization': `Bearer ${BEARER_TOKEN}`,
                 'x-csrf-token': csrfToken,
@@ -66,15 +86,19 @@ async function fetchWithAuth(url: string, csrfToken: string, attempt = 0): Promi
             },
         });
     } catch (e) {
+        if (signal?.aborted) throw createAbortError();
         if (attempt >= MAX_RETRIES) throw e;
-        await delay(2000 * 2 ** attempt);
-        return fetchWithAuth(url, csrfToken, attempt + 1);
+        await delay(2000 * 2 ** attempt, signal);
+        return fetchWithAuth(url, csrfToken, attempt + 1, signal);
+    } finally {
+        clearTimeout(timeoutId);
+        signal?.removeEventListener('abort', onExternalAbort);
     }
 
     if ((response.status === 429 || response.status >= 500) && attempt < MAX_RETRIES) {
         console.warn(`[ListLens:Background] ${response.status} from X, backing off (attempt ${attempt + 1}).`);
-        await delay(2000 * 2 ** attempt);
-        return fetchWithAuth(url, csrfToken, attempt + 1);
+        await delay(2000 * 2 ** attempt, signal);
+        return fetchWithAuth(url, csrfToken, attempt + 1, signal);
     }
 
     if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
@@ -129,6 +153,7 @@ async function fetchListMembers(
     csrfToken: string,
     cancelled: () => boolean = () => false,
     onMember: (member: MemberIdentity) => void = () => undefined,
+    signal?: AbortSignal,
 ): Promise<Set<string>> {
     const members = new Set<string>();
     const seenCursors = new Set<string>();
@@ -138,7 +163,8 @@ async function fetchListMembers(
     while (true) {
         const variables = JSON.stringify({ listId, count: PAGE_SIZE, cursor: cursor || undefined });
         const url = `https://x.com/i/api/graphql/${membersQueryId}/ListMembers?variables=${encodeURIComponent(variables)}`;
-        const page = parseMembersPage(await fetchWithAuth(url, csrfToken));
+        if (cancelled() || signal?.aborted) throw createAbortError();
+        const page = parseMembersPage(await fetchWithAuth(url, csrfToken, 0, signal));
         const handles = page.handles;
         const nextCursor = page.cursor;
 
@@ -156,7 +182,7 @@ async function fetchListMembers(
         seenCursors.add(nextCursor);
         cursor = nextCursor;
 
-        await delay(Math.floor(Math.random() * 700) + 800);
+        await delay(Math.floor(Math.random() * 700) + 800, signal);
     }
 
     return members;
@@ -201,19 +227,27 @@ async function applyListMutation(payload: {
 // MAIN FULL SYNC
 // ---------------------------------------------------------
 async function fetchOwnedLists(
-    ownershipsQueryId: string,
+    queryId: string,
     currentUserId: string,
     csrfToken: string,
+    operation: 'ListsManagementPageTimeline' | 'ListOwnerships',
     cancelled: () => boolean = () => false,
+    signal?: AbortSignal,
 ): Promise<OwnedListSummary[]> {
     const lists = new Map<string, OwnedListSummary>();
     const seenCursors = new Set<string>();
     let cursor = '';
 
     while (true) {
-        const variables = buildListOwnershipsVariables(currentUserId, PAGE_SIZE, cursor);
-        const url = `https://x.com/i/api/graphql/${ownershipsQueryId}/ListOwnerships?variables=${encodeURIComponent(variables)}`;
-        const page = parseOwnedListsPage(await fetchWithAuth(url, csrfToken), currentUserId);
+        if (cancelled() || signal?.aborted) throw createAbortError();
+        const variables = operation === 'ListOwnerships'
+            ? buildListOwnershipsVariables(currentUserId, PAGE_SIZE, cursor)
+            : JSON.stringify({ count: PAGE_SIZE, ...(cursor ? { cursor } : {}) });
+        const url = `https://x.com/i/api/graphql/${queryId}/${operation}?variables=${encodeURIComponent(variables)}`;
+        const payload = await fetchWithAuth(url, csrfToken, 0, signal);
+        const page = operation === 'ListOwnerships'
+            ? parseOwnedListsPage(payload, currentUserId)
+            : parseListManagementPage(payload, currentUserId);
 
         for (const list of page.lists) lists.set(list.id, list);
 
@@ -222,7 +256,7 @@ async function fetchOwnedLists(
         seenCursors.add(page.cursor);
         cursor = page.cursor;
 
-        await delay(Math.floor(Math.random() * 700) + 800);
+        await delay(Math.floor(Math.random() * 700) + 800, signal);
     }
 
     return [...lists.values()];
@@ -230,29 +264,56 @@ async function fetchOwnedLists(
 
 let fullSyncRunning = false;
 let cancelRequested = false;
+let activeSyncController: AbortController | null = null;
+
+function isSyncCancelled(): boolean {
+    return cancelRequested || activeSyncController?.signal.aborted === true;
+}
 
 async function syncLists() {
     if (fullSyncRunning) return;
     fullSyncRunning = true;
     cancelRequested = false;
+    const syncController = new AbortController();
+    activeSyncController = syncController;
 
     try {
         await setSyncState({ status: 'running', done: 0, total: 0 });
 
         const csrfToken = await getCsrfToken();
-        const ownershipsQueryId = await getDynamicQueryId('ListOwnerships');
+        const listsQueryId = await getDynamicQueryId('ListsManagementPageTimeline');
         const membersQueryId = await getDynamicQueryId('ListMembers');
         const currentUserId = await getCurrentUserId();
         if (!currentUserId) {
             throw new Error('Could not determine the signed-in X user ID. Sign in to X and try again.');
         }
 
-        const lists = await fetchOwnedLists(
-            ownershipsQueryId,
-            currentUserId,
-            csrfToken,
-            () => cancelRequested,
-        );
+        let lists: OwnedListSummary[];
+        try {
+            lists = await fetchOwnedLists(
+                listsQueryId,
+                currentUserId,
+                csrfToken,
+                'ListsManagementPageTimeline',
+                isSyncCancelled,
+                syncController.signal,
+            );
+        } catch (managementError) {
+            if (isSyncCancelled()) throw managementError;
+            const queryIds = await getStoredQueryIds();
+            const ownershipsQueryId = queryIds.ListOwnerships;
+            if (!ownershipsQueryId) throw managementError;
+
+            console.warn('[ListLens:Background] Lists management response failed; trying ListOwnerships.', managementError);
+            lists = await fetchOwnedLists(
+                ownershipsQueryId,
+                currentUserId,
+                csrfToken,
+                'ListOwnerships',
+                isSyncCancelled,
+                syncController.signal,
+            );
+        }
 
         const listMeta: ListMeta = {};
         for (const list of lists) listMeta[list.id] = list.name;
@@ -263,30 +324,31 @@ async function syncLists() {
         let done = 0;
 
         for (const list of lists) {
-            if (cancelRequested) break;
+            if (isSyncCancelled()) break;
             await setSyncState({ status: 'running', done, total: lists.length, list: list.name });
 
             const members = await fetchListMembers(
                 list.id,
                 membersQueryId,
                 csrfToken,
-                () => cancelRequested,
+                isSyncCancelled,
                 (member) => { nextUserHandles[member.userId] = member.handle; },
+                syncController.signal,
             );
-            if (cancelRequested) break;
+            if (isSyncCancelled()) break;
 
             for (const handle of members) {
                 if (!localCache[handle]) localCache[handle] = [];
                 localCache[handle].push(list.id);
             }
             done++;
-            await delay(INTER_LIST_DELAY_MS);
+            await delay(INTER_LIST_DELAY_MS, syncController.signal);
         }
 
-        if (cancelRequested) {
+        if (isSyncCancelled()) {
             // Leave the previous cache untouched rather than committing a partial one.
             console.log('[ListLens:Background] Sync cancelled by user.');
-            await setSyncState({ status: 'idle' });
+            await setSyncState({ status: 'cancelled', at: Date.now() });
             return;
         }
 
@@ -298,14 +360,42 @@ async function syncLists() {
             lastSync: Date.now(),
             cacheVersion: CACHE_VERSION,
         });
-        await setSyncState({ status: 'done' });
+        await setSyncState({
+            status: 'done',
+            at: Date.now(),
+            listCount: lists.length,
+            peopleCount: Object.keys(localCache).length,
+        });
     } catch (error) {
-        console.error('[ListLens:Background] Full sync failed', error);
-        await setSyncState({ status: 'error', error: String(error) });
+        if (isSyncCancelled()) {
+            console.log('[ListLens:Background] Sync cancelled by user.');
+            await setSyncState({ status: 'cancelled', at: Date.now() });
+        } else {
+            console.error('[ListLens:Background] Full sync failed', error);
+            await setSyncState({ status: 'error', error: String(error) });
+        }
     } finally {
         fullSyncRunning = false;
         cancelRequested = false;
+        activeSyncController = null;
     }
+}
+
+async function requestSyncCancellation(): Promise<void> {
+    cancelRequested = true;
+    activeSyncController?.abort();
+
+    const { syncState } = await getLocal(['syncState']);
+    if (syncState?.status !== 'running') return;
+
+    if (!activeSyncController) {
+        // The worker may have restarted while the popup still shows a running
+        // sync. Mark that orphaned state stopped instead of leaving it stuck.
+        await setSyncState({ status: 'cancelled', at: Date.now() });
+        return;
+    }
+
+    await setSyncState({ ...syncState, cancelRequested: true });
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -323,7 +413,7 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
     }
 
     if (message?.type === MSG.CANCEL_SYNC) {
-        cancelRequested = true;
+        void requestSyncCancellation();
         sendResponse({ status: 'cancelling' });
     }
 

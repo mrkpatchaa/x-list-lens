@@ -32,11 +32,12 @@ function readString(value: unknown): string | undefined {
 function readListRecord(value: unknown): OwnedListSummary | undefined {
     if (!isRecord(value)) return undefined
 
-    const id = readString(value.id_str)
+    const id = readString(value.id_str) ?? readString(value.rest_id) ?? readString(value.id)
     const name = readString(value.name)
     if (!id || !name || !LIST_ID_RE.test(id) || name.length > 200) return undefined
     const hasListMetadata = value.member_count !== undefined
         || value.mode !== undefined
+        || value.subscriber_count !== undefined
         || Object.prototype.hasOwnProperty.call(value, 'is_member')
     if (!hasListMetadata) return undefined
 
@@ -55,18 +56,19 @@ function readCursor(value: unknown): string | undefined {
     return cursor && cursor !== '0' ? cursor : undefined
 }
 
-export function parseOwnedListsPage(
+function parseListPage(
     payload: unknown,
     currentUserId: string,
+    operation: 'ListOwnerships' | 'ListsManagementPageTimeline',
 ): { lists: OwnedListSummary[]; cursor: string } {
     if (!isRecord(payload) || !isRecord(payload.data)) {
         if (isRecord(payload) && Array.isArray(payload.errors) && payload.errors.length > 0) {
-            throw new XApiError('X rejected the ListOwnerships request.', 'graphql', 'ListOwnerships')
+            throw new XApiError(`X rejected the ${operation} request.`, 'graphql', operation)
         }
         throw new XApiError(
-            'The ListOwnerships response could not be read. X may have changed it.',
+            `The ${operation} response could not be read. X may have changed it.`,
             'contract',
-            'ListOwnerships',
+            operation,
         )
     }
 
@@ -140,18 +142,32 @@ export function parseOwnedListsPage(
 
     if (!foundOwnershipConnection && !foundTimeline) {
         throw new XApiError(
-            'The ListOwnerships response had no ownership connection. X may have changed it.',
+            `The ${operation} response had no ownership connection. X may have changed it.`,
             'contract',
-            'ListOwnerships',
+            operation,
         )
     }
     if (listRecordCount > 0 && ownedListRecordCount === 0) {
         throw new XApiError(
-            'The ListOwnerships response contained no lists owned by the signed-in user.',
+            `The ${operation} response contained no lists owned by the signed-in user.`,
             'contract',
-            'ListOwnerships',
+            operation,
         )
     }
 
     return { lists: [...lists.values()], cursor }
+}
+
+export function parseOwnedListsPage(
+    payload: unknown,
+    currentUserId: string,
+): { lists: OwnedListSummary[]; cursor: string } {
+    return parseListPage(payload, currentUserId, 'ListOwnerships')
+}
+
+export function parseListManagementPage(
+    payload: unknown,
+    currentUserId: string,
+): { lists: OwnedListSummary[]; cursor: string } {
+    return parseListPage(payload, currentUserId, 'ListsManagementPageTimeline')
 }

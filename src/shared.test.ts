@@ -69,9 +69,9 @@ describe('setup state', () => {
 
     it('reports the exact missing operations in order', () => {
         expect(getMissingOperations({ ListMembers: 'abc123' }))
-            .toEqual(['ListOwnerships'])
+            .toEqual(['ListsManagementPageTimeline'])
         expect(getMissingOperations({})).toEqual([
-            'ListOwnerships',
+            'ListsManagementPageTimeline',
             'ListMembers',
         ])
     })
