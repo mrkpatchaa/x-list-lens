@@ -35,16 +35,18 @@ function readListRecord(value: unknown): OwnedListSummary | undefined {
     const id = readString(value.id_str)
     const name = readString(value.name)
     if (!id || !name || !LIST_ID_RE.test(id) || name.length > 200) return undefined
-    if (value.member_count === undefined && value.mode === undefined) return undefined
+    const hasListMetadata = value.member_count !== undefined
+        || value.mode !== undefined
+        || Object.prototype.hasOwnProperty.call(value, 'is_member')
+    if (!hasListMetadata) return undefined
 
     return { id, name }
 }
 
 function isOwnershipKey(key: string): boolean {
     const normalized = key.toLowerCase().replace(/[-_]/g, '')
-    return normalized === 'ownedlists'
-        || normalized === 'listownerships'
-        || normalized === 'listownership'
+    return normalized.includes('ownedlist')
+        || normalized.includes('listownership')
         || normalized === 'ownerships'
 }
 
@@ -71,11 +73,12 @@ export function parseOwnedListsPage(
     const lists = new Map<string, OwnedListSummary>()
     let cursor = ''
     let foundOwnershipConnection = false
+    let foundTimeline = false
     let listRecordCount = 0
     let ownedListRecordCount = 0
     let visited = 0
-    const queue: Array<{ value: unknown; underOwnership: boolean; depth: number }> = [
-        { value: payload.data, underOwnership: false, depth: 0 },
+    const queue: Array<{ value: unknown; underOwnership: boolean; underTimeline: boolean; depth: number }> = [
+        { value: payload.data, underOwnership: false, underTimeline: false, depth: 0 },
     ]
 
     for (let index = 0; index < queue.length && visited < MAX_TRAVERSAL_NODES; index++) {
@@ -85,40 +88,57 @@ export function parseOwnedListsPage(
 
         if (Array.isArray(current.value)) {
             for (const item of current.value) {
-                queue.push({ value: item, underOwnership: current.underOwnership, depth: current.depth + 1 })
+                queue.push({
+                    value: item,
+                    underOwnership: current.underOwnership,
+                    underTimeline: current.underTimeline,
+                    depth: current.depth + 1,
+                })
             }
             continue
         }
         if (!isRecord(current.value)) continue
 
-        if (current.underOwnership) {
+        if (current.underOwnership || current.underTimeline) {
             const record = readListRecord(current.value)
             if (record) {
                 listRecordCount++
-                if (isOwnedListRecord(current.value, currentUserId, true)) {
+                if (isOwnedListRecord(current.value, currentUserId)) {
                     lists.set(record.id, record)
                     ownedListRecordCount++
                 }
             }
         }
 
+        if (
+            current.underTimeline
+            && typeof current.value.entryId === 'string'
+            && current.value.entryId.startsWith('cursor-')
+            && isRecord(current.value.content)
+        ) {
+            cursor = readCursor(current.value.content.value) || cursor
+        }
+
         for (const [key, child] of Object.entries(current.value)) {
             const ownershipKey = isOwnershipKey(key)
             const underOwnership = current.underOwnership || ownershipKey
+            const timelineKey = key === 'instructions' && Array.isArray(child)
+            const underTimeline = current.underTimeline || timelineKey
             if (ownershipKey) foundOwnershipConnection = true
+            if (timelineKey) foundTimeline = true
 
             const normalizedKey = key.toLowerCase().replace(/[-_]/g, '')
-            if (underOwnership && (normalizedKey === 'cursor' || normalizedKey === 'nextcursor' || normalizedKey === 'endcursor')) {
+            if ((underOwnership || underTimeline) && (normalizedKey === 'cursor' || normalizedKey === 'nextcursor' || normalizedKey === 'endcursor')) {
                 cursor = readCursor(child) || cursor
             }
 
             if (isRecord(child) || Array.isArray(child)) {
-                queue.push({ value: child, underOwnership, depth: current.depth + 1 })
+                queue.push({ value: child, underOwnership, underTimeline, depth: current.depth + 1 })
             }
         }
     }
 
-    if (!foundOwnershipConnection) {
+    if (!foundOwnershipConnection && !foundTimeline) {
         throw new XApiError(
             'The ListOwnerships response had no ownership connection. X may have changed it.',
             'contract',
