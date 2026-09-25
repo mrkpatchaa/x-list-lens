@@ -10,6 +10,7 @@ import {
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
 import { getUserIdFromTwid, isOwnedListRecord } from './list-filter';
+import { hasTimelineInstructions } from './list-response';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -232,12 +233,12 @@ async function syncLists() {
 
         const listsUrl = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent('{"count":100}')}`;
         const currentUserId = await getCurrentUserId();
-        const lists = extractLists(await fetchWithAuth(listsUrl, csrfToken), currentUserId);
-        if (lists.length === 0) throw new Error('Could not parse list structures from JSON.');
+        const listPayload = await fetchWithAuth(listsUrl, csrfToken);
+        if (!hasTimelineInstructions(listPayload)) throw new Error('Could not parse list structures from JSON.');
+        const lists = extractLists(listPayload, currentUserId);
 
         const listMeta: ListMeta = {};
         for (const list of lists) listMeta[list.id] = list.name;
-        await chrome.storage.local.set({ listMeta });
 
         const localCache: ListCache = {};
         const { userHandles } = await getLocal(['userHandles']);
@@ -274,6 +275,7 @@ async function syncLists() {
 
         await chrome.storage.local.set({
             listCache: localCache,
+            listMeta,
             userHandles: nextUserHandles,
             needsFullSync: false,
             lastSync: Date.now(),
