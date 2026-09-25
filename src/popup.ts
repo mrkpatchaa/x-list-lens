@@ -102,17 +102,37 @@ function setStatus(label: string, kind: keyof typeof statusClasses) {
 }
 
 let listFilter = '';
+let expandedListId: string | null = null;
 let currentCache: ListCache = {};
 let currentMeta: ListMeta = {};
+const MAX_VISIBLE_MEMBERS = 50;
+
+function membersForList(cache: ListCache, listId: string): string[] {
+    return Object.entries(cache)
+        .filter(([, listIds]) => listIds.includes(listId))
+        .map(([handle]) => handle)
+        .sort((a, b) => a.localeCompare(b));
+}
+
+function createChevron(expanded: boolean) {
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    icon.setAttribute('viewBox', '0 0 16 16');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.classList.add('h-3.5', 'w-3.5', 'shrink-0', 'text-slate-500');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', expanded ? 'm4 6 4 4 4-4' : 'm4 10 4-4 4 4');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    icon.appendChild(path);
+    return icon;
+}
 
 function renderLists(cache: ListCache, meta: ListMeta) {
-    const memberCounts = new Map<string, number>();
-    for (const listIds of Object.values(cache)) {
-        for (const listId of listIds) memberCounts.set(listId, (memberCounts.get(listId) || 0) + 1);
-    }
-
     const entries = Object.entries(meta)
-        .map(([id, name]) => ({ id, name, count: memberCounts.get(id) || 0 }))
+        .map(([id, name]) => ({ id, name, count: membersForList(cache, id).length }))
         .sort((a, b) => a.name.localeCompare(b.name));
     const query = listFilter.trim().toLowerCase();
     const filtered = entries.filter(({ name }) => !query || name.toLowerCase().includes(query));
@@ -128,11 +148,16 @@ function renderLists(cache: ListCache, meta: ListMeta) {
     for (const { id, name, count } of filtered) {
         const item = document.createElement('div');
         item.setAttribute('role', 'listitem');
+        item.className = 'rounded-lg';
 
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
-        button.title = `Open ${name} on X`;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-1';
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+        toggle.setAttribute('aria-expanded', String(expandedListId === id));
+        toggle.title = expandedListId === id ? `Hide members in ${name}` : `Show members in ${name}`;
 
         const label = document.createElement('span');
         label.className = 'min-w-0 truncate text-xs font-medium text-slate-200';
@@ -140,12 +165,56 @@ function renderLists(cache: ListCache, meta: ListMeta) {
         const countLabel = document.createElement('span');
         countLabel.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
         countLabel.textContent = plural(count, 'person', 'people');
-        button.append(label, countLabel);
-        button.addEventListener('click', () => {
+        toggle.append(label, countLabel, createChevron(expandedListId === id));
+        toggle.addEventListener('click', () => {
+            expandedListId = expandedListId === id ? null : id;
+            renderLists(currentCache, currentMeta);
+        });
+        row.appendChild(toggle);
+
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'shrink-0 rounded-md px-2 py-1.5 text-[11px] text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+        open.textContent = 'Open';
+        open.title = `Open ${name} on X`;
+        open.addEventListener('click', () => {
             void chrome.tabs.create({ url: `https://x.com/i/lists/${encodeURIComponent(id)}` });
             window.close();
         });
-        item.appendChild(button);
+        row.appendChild(open);
+        item.appendChild(row);
+
+        if (expandedListId === id) {
+            const members = membersForList(cache, id);
+            const memberList = document.createElement('div');
+            memberList.className = 'ml-2 mt-1 max-h-24 space-y-0.5 overflow-y-auto border-l border-slate-800 pl-2';
+            if (members.length === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'px-2 py-1.5 text-[11px] text-slate-500';
+                empty.textContent = 'No cached members.';
+                memberList.appendChild(empty);
+            } else {
+                for (const handle of members.slice(0, MAX_VISIBLE_MEMBERS)) {
+                    const member = document.createElement('button');
+                    member.type = 'button';
+                    member.className = 'block w-full rounded-md px-2 py-1 text-left text-[11px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+                    member.textContent = `@${handle}`;
+                    member.addEventListener('click', () => {
+                        void chrome.tabs.create({ url: `https://x.com/${encodeURIComponent(handle)}` });
+                        window.close();
+                    });
+                    memberList.appendChild(member);
+                }
+                if (members.length > MAX_VISIBLE_MEMBERS) {
+                    const more = document.createElement('p');
+                    more.className = 'px-2 py-1.5 text-[11px] text-slate-500';
+                    more.textContent = `+${members.length - MAX_VISIBLE_MEMBERS} more`;
+                    memberList.appendChild(more);
+                }
+            }
+            item.appendChild(memberList);
+        }
+
         listsList.appendChild(item);
     }
 }

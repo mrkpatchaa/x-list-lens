@@ -71,6 +71,11 @@ describe('popup states', () => {
         expect(listText).toContain('2 people');
         expect(listText).toContain('1 person');
 
+        const designToggle = Array.from(document.querySelectorAll('#listsList button'))
+            .find((button) => button.textContent?.includes('Design')) as HTMLButtonElement;
+        designToggle.click();
+        await vi.waitFor(() => expect(document.getElementById('listsList')?.textContent).toContain('@alice'));
+
         const search = document.getElementById('listsSearch') as HTMLInputElement;
         search.value = 'cod';
         search.dispatchEvent(new Event('input', { bubbles: true }));
