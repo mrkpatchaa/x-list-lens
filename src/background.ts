@@ -9,7 +9,7 @@ import {
     type UserHandleIndex,
 } from './shared';
 import { applyMembershipDelta } from './cache-delta';
-import { getUserIdFromTwid, isOwnedListRecord } from './list-filter';
+import { getUserIdFromListPayload, getUserIdFromTwid, isOwnedListRecord } from './list-filter';
 import { hasTimelineInstructions } from './list-response';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -33,10 +33,9 @@ async function getCsrfToken(): Promise<string> {
     return cookie.value;
 }
 
-async function getCurrentUserId(): Promise<string | undefined> {
+async function getCurrentUserId(payload?: unknown): Promise<string | undefined> {
     const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'twid' });
-    if (!cookie?.value) return undefined;
-    return getUserIdFromTwid(cookie.value);
+    return (cookie?.value && getUserIdFromTwid(cookie.value)) || getUserIdFromListPayload(payload);
 }
 
 async function getDynamicQueryId(operationName: string): Promise<string> {
@@ -232,8 +231,8 @@ async function syncLists() {
         const membersQueryId = await getDynamicQueryId('ListMembers');
 
         const listsUrl = `https://x.com/i/api/graphql/${listsQueryId}/ListsManagementPageTimeline?variables=${encodeURIComponent('{"count":100}')}`;
-        const currentUserId = await getCurrentUserId();
         const listPayload = await fetchWithAuth(listsUrl, csrfToken);
+        const currentUserId = await getCurrentUserId(listPayload);
         if (!hasTimelineInstructions(listPayload)) throw new Error('Could not parse list structures from JSON.');
         const lists = extractLists(listPayload, currentUserId);
 

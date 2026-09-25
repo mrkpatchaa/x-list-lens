@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { getUserIdFromTwid, isOwnedListRecord } from './list-filter'
+import { getUserIdFromListPayload, getUserIdFromTwid, isOwnedListRecord } from './list-filter'
 
 describe('getUserIdFromTwid', () => {
     it('reads the user ID from the encoded twid cookie format', () => {
         expect(getUserIdFromTwid('u%3D200451873%7Ccookie-suffix')).toBe('200451873')
         expect(getUserIdFromTwid('u%3D200451873')).toBe('200451873')
+    })
+})
+
+describe('getUserIdFromListPayload', () => {
+    it('reads a viewer identity from the list response', () => {
+        expect(getUserIdFromListPayload({
+            data: { viewer: { user_results: { result: { rest_id: '200451873' } } } },
+        })).toBe('200451873')
     })
 })
 
@@ -19,6 +27,10 @@ describe('isOwnedListRecord', () => {
 
     it('rejects records owned by another user when ownership is explicit', () => {
         expect(isOwnedListRecord({ id_str: '1', owner: { rest_id: '99' } }, '42')).toBe(false)
+    })
+
+    it('rejects explicit non-owned records even without a cookie user ID', () => {
+        expect(isOwnedListRecord({ id_str: '1', owned: false })).toBe(false)
     })
 
     it('keeps unknown ownership shapes to avoid dropping valid lists', () => {
