@@ -354,6 +354,7 @@ function sendMessage(message: { type: string }): Promise<unknown> {
 }
 
 syncBtn.addEventListener('click', () => {
+    console.info('[ListLens:Popup] Sync requested.');
     syncBtn.disabled = true;
     void sendMessage({ type: MSG.START_SYNC }).catch(() => {
         syncBtn.disabled = false;
@@ -363,6 +364,7 @@ syncBtn.addEventListener('click', () => {
 });
 
 cancelBtn.addEventListener('click', () => {
+    console.info('[ListLens:Popup] Cancellation requested.');
     cancelBtn.disabled = true;
     progressLabel.textContent = 'Stopping…';
     void sendMessage({ type: MSG.CANCEL_SYNC }).catch(() => {

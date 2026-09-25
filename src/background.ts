@@ -16,6 +16,7 @@ import {
     parseOwnedListsPage,
     type OwnedListSummary,
 } from './list-ownership';
+import { collectListPages } from './list-pages';
 import { createAbortError, waitWithAbort } from './abortable';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
@@ -26,6 +27,7 @@ const PAGE_SIZE = 100;
 const INTER_LIST_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 20000;
 const MAX_RETRIES = 3;
+const MAX_MEMBER_PAGES = 200;
 
 const delay = (ms: number, signal?: AbortSignal) => waitWithAbort(ms, signal);
 
@@ -158,23 +160,37 @@ async function fetchListMembers(
     const members = new Set<string>();
     const seenCursors = new Set<string>();
     let cursor = '';
+    let pageCount = 0;
     let pagesWithoutHandles = 0;
+    let pagesWithoutNewMembers = 0;
 
     while (true) {
+        if (pageCount >= MAX_MEMBER_PAGES) {
+            console.warn(`[ListLens:Background] Stopped list ${listId} after ${MAX_MEMBER_PAGES} member pages.`);
+            break;
+        }
         const variables = JSON.stringify({ listId, count: PAGE_SIZE, cursor: cursor || undefined });
         const url = `https://x.com/i/api/graphql/${membersQueryId}/ListMembers?variables=${encodeURIComponent(variables)}`;
         if (cancelled() || signal?.aborted) throw createAbortError();
         const page = parseMembersPage(await fetchWithAuth(url, csrfToken, 0, signal));
         const handles = page.handles;
         const nextCursor = page.cursor;
+        pageCount++;
+        const before = members.size;
 
         for (const handle of handles) members.add(handle.toLowerCase());
         for (const member of page.members) onMember(member);
+        console.debug(`[ListLens:Background] List ${listId} page ${pageCount}: ${handles.length} members (${members.size - before} new).`);
 
         if (handles.length === 0) {
             if (++pagesWithoutHandles >= 2) break;
         } else {
             pagesWithoutHandles = 0;
+        }
+        if (members.size === before) {
+            if (++pagesWithoutNewMembers >= 2) break;
+        } else {
+            pagesWithoutNewMembers = 0;
         }
 
         if (cancelled()) break;
@@ -234,32 +250,21 @@ async function fetchOwnedLists(
     cancelled: () => boolean = () => false,
     signal?: AbortSignal,
 ): Promise<OwnedListSummary[]> {
-    const lists = new Map<string, OwnedListSummary>();
-    const seenCursors = new Set<string>();
-    let cursor = '';
-
-    while (true) {
+    console.info(`[ListLens:Background] Reading lists via ${operation}…`);
+    const lists = await collectListPages(async (cursor) => {
         if (cancelled() || signal?.aborted) throw createAbortError();
         const variables = operation === 'ListOwnerships'
             ? buildListOwnershipsVariables(currentUserId, PAGE_SIZE, cursor)
             : JSON.stringify({ count: PAGE_SIZE, ...(cursor ? { cursor } : {}) });
         const url = `https://x.com/i/api/graphql/${queryId}/${operation}?variables=${encodeURIComponent(variables)}`;
         const payload = await fetchWithAuth(url, csrfToken, 0, signal);
-        const page = operation === 'ListOwnerships'
+        return operation === 'ListOwnerships'
             ? parseOwnedListsPage(payload, currentUserId)
             : parseListManagementPage(payload, currentUserId);
+    });
 
-        for (const list of page.lists) lists.set(list.id, list);
-
-        if (cancelled()) break;
-        if (!page.cursor || page.cursor === cursor || seenCursors.has(page.cursor)) break;
-        seenCursors.add(page.cursor);
-        cursor = page.cursor;
-
-        await delay(Math.floor(Math.random() * 700) + 800, signal);
-    }
-
-    return [...lists.values()];
+    console.info(`[ListLens:Background] ${operation} returned ${lists.length} owned lists.`);
+    return lists;
 }
 
 let fullSyncRunning = false;
@@ -276,6 +281,7 @@ async function syncLists() {
     cancelRequested = false;
     const syncController = new AbortController();
     activeSyncController = syncController;
+    console.info('[ListLens:Background] Full sync started.');
 
     try {
         await setSyncState({ status: 'running', done: 0, total: 0 });
@@ -319,12 +325,14 @@ async function syncLists() {
         for (const list of lists) listMeta[list.id] = list.name;
 
         const localCache: ListCache = {};
+        console.info(`[ListLens:Background] Reading members for ${lists.length} lists.`);
         const { userHandles } = await getLocal(['userHandles']);
         const nextUserHandles: UserHandleIndex = { ...(userHandles || {}) };
         let done = 0;
 
         for (const list of lists) {
             if (isSyncCancelled()) break;
+            console.info(`[ListLens:Background] Syncing list ${done + 1}/${lists.length}: ${list.name}`);
             await setSyncState({ status: 'running', done, total: lists.length, list: list.name });
 
             const members = await fetchListMembers(
@@ -360,6 +368,7 @@ async function syncLists() {
             lastSync: Date.now(),
             cacheVersion: CACHE_VERSION,
         });
+        console.info('[ListLens:Background] Full sync finished.');
         await setSyncState({
             status: 'done',
             at: Date.now(),
