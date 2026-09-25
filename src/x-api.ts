@@ -54,13 +54,16 @@ export function assertSuccessfulGraphQLPayload(value: unknown, operation: string
         throw new XApiError(`X returned an unreadable response for ${operation}.`, 'contract', operation)
     }
 
-    if (Array.isArray(value.errors) && value.errors.length > 0) {
-        throw new XApiError(`X rejected the ${operation} request.`, 'graphql', operation)
-    }
-
     if (!isRecord(value.data)) {
+        if (Array.isArray(value.errors) && value.errors.length > 0) {
+            throw new XApiError(`X rejected the ${operation} request.`, 'graphql', operation)
+        }
         throw new XApiError(`X returned no data for ${operation}.`, 'contract', operation)
     }
+
+    // X can return partial data plus non-fatal GraphQL errors (for example,
+    // unavailable accounts). The shape-specific parser below still decides
+    // whether the usable portion is safe to commit.
 
     return value
 }

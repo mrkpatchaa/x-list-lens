@@ -74,6 +74,15 @@ describe('parseMembersPage', () => {
             .toThrow(XApiError)
     })
 
+    it('keeps usable member data when X returns partial GraphQL errors', () => {
+        const payload = {
+            ...memberPayload([memberEntry('alice')]),
+            errors: [{ message: 'Unavailable member' }],
+        }
+
+        expect(parseMembersPage(payload).handles).toEqual(['alice'])
+    })
+
     it('fails closed when the expected member timeline is missing', () => {
         const unsafePayload = {
             data: {
