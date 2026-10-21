@@ -150,4 +150,19 @@ describe('runSync', () => {
 
         expect(storage.listColors).toEqual({ '3001': 0 })
     })
+
+    it('reads only the followed lists you include, and keeps that choice', async () => {
+        await afterFullSync()
+        expect(storage.followedLists).toEqual({ '5001': { name: 'Followed demo', included: false, memberCount: 7 } })
+        expect(storage.listMeta).not.toHaveProperty('5001')
+
+        storage.followedLists = { '5001': { name: 'Followed demo', included: true, memberCount: 7 } }
+        const { urls, fetchJson } = fakeX()
+        await runSync('fast', deps(fetchJson))
+
+        expect(memberListIds(urls)).toEqual(['5001'])
+        expect((storage.listCache as Record<string, string[]>).member_5001).toEqual(['5001'])
+        expect(storage.listMeta).toHaveProperty('5001', 'Followed demo')
+        expect(storage.followedLists).toEqual({ '5001': { name: 'Followed demo', included: true, memberCount: 7 } })
+    })
 })

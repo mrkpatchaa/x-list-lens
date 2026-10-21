@@ -2,6 +2,9 @@ import { XApiError } from './x-api'
 import { isOwnedListRecord } from './list-filter'
 
 export type OwnedListSummary = { id: string; name: string; memberCount?: number; ownerHandle?: string }
+// `followed` holds lists the user follows but does not own. Only the Lists
+// management response reports them; ListOwnerships returns owned lists only.
+export type ListPageResult = { lists: OwnedListSummary[]; followed: OwnedListSummary[]; cursor: string }
 
 type JsonRecord = Record<string, unknown>
 
@@ -74,7 +77,7 @@ function parseListPage(
     payload: unknown,
     currentUserId: string,
     operation: 'ListOwnerships' | 'ListsManagementPageTimeline',
-): { lists: OwnedListSummary[]; cursor: string } {
+): ListPageResult {
     if (!isRecord(payload) || !isRecord(payload.data)) {
         if (isRecord(payload) && Array.isArray(payload.errors) && payload.errors.length > 0) {
             throw new XApiError(`X rejected the ${operation} request.`, 'graphql', operation)
@@ -87,14 +90,16 @@ function parseListPage(
     }
 
     const lists = new Map<string, OwnedListSummary>()
+    const followed = new Map<string, OwnedListSummary>()
     let cursor = ''
     let foundOwnershipConnection = false
     let foundTimeline = false
     let listRecordCount = 0
     let ownedListRecordCount = 0
     let visited = 0
-    const queue: Array<{ value: unknown; underOwnership: boolean; underTimeline: boolean; depth: number }> = [
-        { value: payload.data, underOwnership: false, underTimeline: false, depth: 0 },
+    type QueueItem = { value: unknown; underOwnership: boolean; underTimeline: boolean; underSuggestion: boolean; depth: number }
+    const queue: QueueItem[] = [
+        { value: payload.data, underOwnership: false, underTimeline: false, underSuggestion: false, depth: 0 },
     ]
 
     for (let index = 0; index < queue.length && visited < MAX_TRAVERSAL_NODES; index++) {
@@ -104,16 +109,13 @@ function parseListPage(
 
         if (Array.isArray(current.value)) {
             for (const item of current.value) {
-                queue.push({
-                    value: item,
-                    underOwnership: current.underOwnership,
-                    underTimeline: current.underTimeline,
-                    depth: current.depth + 1,
-                })
+                queue.push({ ...current, value: item, depth: current.depth + 1 })
             }
             continue
         }
         if (!isRecord(current.value)) continue
+        // "Discover new Lists" records are never cached, whatever their flags say.
+        const underSuggestion = current.underSuggestion || isSuggestionModule(current.value)
 
         if (current.underOwnership || current.underTimeline) {
             const record = readListRecord(current.value)
@@ -122,6 +124,8 @@ function parseListPage(
                 if (isOwnedListRecord(current.value, currentUserId)) {
                     lists.set(record.id, record)
                     ownedListRecordCount++
+                } else if (operation === 'ListsManagementPageTimeline' && current.value.following === true && !underSuggestion) {
+                    followed.set(record.id, record)
                 }
             }
         }
@@ -149,7 +153,7 @@ function parseListPage(
             }
 
             if (isRecord(child) || Array.isArray(child)) {
-                queue.push({ value: child, underOwnership, underTimeline, depth: current.depth + 1 })
+                queue.push({ value: child, underOwnership, underTimeline, underSuggestion, depth: current.depth + 1 })
             }
         }
     }
@@ -161,7 +165,7 @@ function parseListPage(
             operation,
         )
     }
-    if (listRecordCount > 0 && ownedListRecordCount === 0) {
+    if (listRecordCount > 0 && ownedListRecordCount === 0 && followed.size === 0) {
         throw new XApiError(
             `The ${operation} response contained no lists owned by the signed-in user.`,
             'contract',
@@ -169,19 +173,27 @@ function parseListPage(
         )
     }
 
-    return { lists: [...lists.values()], cursor }
+    return { lists: [...lists.values()], followed: [...followed.values()], cursor }
+}
+
+// X wraps list recommendations in a module whose clientEventInfo names them.
+function isSuggestionModule(value: JsonRecord): boolean {
+    const info = isRecord(value.clientEventInfo) ? value.clientEventInfo : undefined
+    if (!info) return false
+    const details = isRecord(info.details) && isRecord(info.details.timelinesDetails) ? info.details.timelinesDetails : undefined
+    return info.component === 'suggest_list_to_follow' || details?.injectionType === 'ListToFollow'
 }
 
 export function parseOwnedListsPage(
     payload: unknown,
     currentUserId: string,
-): { lists: OwnedListSummary[]; cursor: string } {
+): ListPageResult {
     return parseListPage(payload, currentUserId, 'ListOwnerships')
 }
 
 export function parseListManagementPage(
     payload: unknown,
     currentUserId: string,
-): { lists: OwnedListSummary[]; cursor: string } {
+): ListPageResult {
     return parseListPage(payload, currentUserId, 'ListsManagementPageTimeline')
 }

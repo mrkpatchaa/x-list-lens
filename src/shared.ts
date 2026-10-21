@@ -116,6 +116,8 @@ export type ListCounts = Record<string, number>;
 export type SyncMode = 'fast' | 'full';
 // List ID -> index into LIST_COLORS. Lists start with no color.
 export type ListColors = Record<string, number>;
+// Lists the user follows but does not own. Off until the user includes one.
+export type FollowedLists = Record<string, { name: string; included: boolean; memberCount?: number }>;
 
 export type SyncErrorCode =
     | 'auth'

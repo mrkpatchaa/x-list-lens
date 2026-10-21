@@ -87,14 +87,17 @@ export function getSelfHandle(root: ParentNode, stored?: string): string | undef
     return profileHandleFromHref(href) ?? (stored && /^[A-Za-z0-9_]{1,15}$/.test(stored) ? stored.toLowerCase() : undefined);
 }
 
-export type BadgeKind = 'none' | 'listed' | 'unlisted';
+// 'followed': every list the person is in is one you follow, not one you own.
+export type BadgeKind = 'none' | 'listed' | 'followed' | 'unlisted';
 
 export function badgeKind(
     handle: string,
     lists: string[] | undefined,
-    opts: { selfHandle?: string; showUnlisted: boolean; synced: boolean },
+    opts: { selfHandle?: string; showUnlisted: boolean; synced: boolean; followedIds?: Set<string> },
 ): BadgeKind {
-    if (lists && lists.length > 0) return 'listed';
+    if (lists && lists.length > 0) {
+        return opts.followedIds && lists.every((id) => opts.followedIds!.has(id)) ? 'followed' : 'listed';
+    }
     // Before a first sync, "in no list" is not known yet.
     if (!opts.showUnlisted || !opts.synced || handle === opts.selfHandle) return 'none';
     return 'unlisted';

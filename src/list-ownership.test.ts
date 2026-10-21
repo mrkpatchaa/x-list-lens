@@ -97,6 +97,7 @@ describe('parseOwnedListsPage', () => {
             },
         ]), '42')).toEqual({
             lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
+            followed: [],
             cursor: '',
         })
     })
@@ -108,6 +109,7 @@ describe('parseOwnedListsPage', () => {
             listRecord('1', 'Mine'),
         ], 'NEXT_PAGE'), '42')).toEqual({
             lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
+            followed: [],
             cursor: 'NEXT_PAGE',
         })
     })
@@ -124,6 +126,7 @@ describe('parseOwnedListsPage', () => {
             },
         ]), '42')).toEqual({
             lists: [{ id: '1', name: 'Mine' }],
+            followed: [],
             cursor: '',
         })
     })
@@ -145,6 +148,7 @@ describe('parseOwnedListsPage', () => {
             },
         ]), '42')).toEqual({
             lists: [{ id: '1', name: 'Mine' }],
+            followed: [],
             cursor: '',
         })
     })
@@ -165,6 +169,7 @@ describe('parseOwnedListsPage', () => {
             },
         ]), '42')).toEqual({
             lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
+            followed: [],
             cursor: 'NEXT_PAGE',
         })
     })
@@ -172,6 +177,7 @@ describe('parseOwnedListsPage', () => {
     it('accepts a valid empty timeline response', () => {
         expect(parseOwnedListsPage(timelineOwnershipPayload([]), '42')).toEqual({
             lists: [],
+            followed: [],
             cursor: '',
         })
     })
@@ -185,6 +191,7 @@ describe('parseOwnedListsPage', () => {
     it('accepts a valid empty ownership result', () => {
         expect(parseOwnedListsPage(ownershipPayload([]), '42')).toEqual({
             lists: [],
+            followed: [],
             cursor: '',
         })
     })
@@ -207,5 +214,19 @@ describe('real ListsManagementPageTimeline capture', () => {
         const { lists } = parseListManagementPage(capture, '1000')
         expect(lists.map((l) => [l.id, l.memberCount])).toEqual([['3001', 14], ['3002', 15], ['3003', 96], ['3004', 49]])
         expect(lists.every((l) => l.ownerHandle === 'listlens_owner')).toBe(true)
+    })
+
+    it('separates owned, followed and recommended lists in a real capture', () => {
+        const page = parseListManagementPage(capture, '1000')
+        // Owned lists carry following: true too, and must stay owned.
+        expect(page.lists.map((l) => l.id)).toEqual(['3001', '3002', '3003', '3004'])
+        // 4001 and 4002 are recommendations; 5001 is the synthetic followed list.
+        expect(page.followed.map((l) => [l.id, l.name, l.memberCount])).toEqual([['5001', 'Followed demo', 7]])
+    })
+
+    it('reads the followed lists of a user who owns none', () => {
+        const page = parseListManagementPage(capture, '9999')
+        expect(page.lists).toEqual([])
+        expect(page.followed.map((l) => l.id)).toEqual(['3001', '3002', '3003', '3004', '5001'])
     })
 })

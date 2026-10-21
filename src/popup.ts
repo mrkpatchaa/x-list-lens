@@ -4,6 +4,7 @@ import {
     getLocal,
     getMissingOperations,
     getStoredQueryIds,
+    type FollowedLists,
     type ListCache,
     type ListColors,
     type HookStatus,
@@ -40,6 +41,8 @@ const listsSearch = el<HTMLInputElement>('listsSearch');
 const listsList = el<HTMLDivElement>('listsList');
 const listsEmpty = el<HTMLParagraphElement>('listsEmpty');
 const unlistedToggle = el<HTMLInputElement>('unlistedToggle');
+const followedGroup = el<HTMLDivElement>('followedGroup');
+const followedList = el<HTMLDivElement>('followedList');
 const exportCsvBtn = el<HTMLButtonElement>('exportCsvBtn');
 const exportJsonBtn = el<HTMLButtonElement>('exportJsonBtn');
 const lastSyncEl = el<HTMLParagraphElement>('lastSync');
@@ -118,6 +121,7 @@ let expandedListId: string | null = null;
 let currentCache: ListCache = {};
 let currentMeta: ListMeta = {};
 let currentColors: ListColors = {};
+let currentFollowed: FollowedLists = {};
 const MAX_VISIBLE_MEMBERS = 50;
 
 function membersForList(cache: ListCache, listId: string): string[] {
@@ -166,14 +170,47 @@ function createSwatch(id: string, name: string) {
     return swatch;
 }
 
+function renderFollowed() {
+    const entries = Object.entries(currentFollowed).sort(([, a], [, b]) => a.name.localeCompare(b.name));
+    followedGroup.classList.toggle('hidden', entries.length === 0);
+    followedList.replaceChildren();
+    for (const [id, list] of entries) {
+        const row = document.createElement('label');
+        row.className = 'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-slate-800/80';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = list.included;
+        box.className = 'h-3.5 w-3.5 shrink-0 accent-blue-500';
+        box.setAttribute('aria-label', `Include ${list.name}`);
+        box.addEventListener('change', () => {
+            currentFollowed = { ...currentFollowed, [id]: { ...list, included: box.checked } };
+            void chrome.storage.local.set({ followedLists: currentFollowed });
+        });
+        const name = document.createElement('span');
+        name.className = 'min-w-0 flex-1 truncate text-slate-200';
+        name.textContent = list.name;
+        row.append(box, name);
+        if (list.memberCount !== undefined) {
+            const count = document.createElement('span');
+            count.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
+            count.textContent = plural(list.memberCount, 'member');
+            row.appendChild(count);
+        }
+        followedList.appendChild(row);
+    }
+}
+
 function renderLists(cache: ListCache, meta: ListMeta) {
+    renderFollowed();
+    // Followed lists you include sit in listMeta too, but have their own group.
     const entries = Object.entries(meta)
+        .filter(([id]) => !(id in currentFollowed))
         .map(([id, name]) => ({ id, name, count: membersForList(cache, id).length }))
         .sort((a, b) => a.name.localeCompare(b.name));
     const query = listFilter.trim().toLowerCase();
     const filtered = entries.filter(({ name }) => !query || name.toLowerCase().includes(query));
 
-    show(listsSection, entries.length > 0);
+    show(listsSection, entries.length > 0 || Object.keys(currentFollowed).length > 0);
     listsCount.textContent = plural(entries.length, 'list');
     listsList.replaceChildren();
     listsEmpty.hidden = filtered.length > 0;
@@ -421,12 +458,13 @@ function render(
 
 async function refresh() {
     const [stored, queryIds, hostAccess] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker', 'listColors']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker', 'listColors', 'followedLists']),
         getStoredQueryIds(),
         hasHostAccess(),
     ]);
     unlistedToggle.checked = stored.showUnlistedMarker === true;
     currentColors = (stored.listColors || {}) as ListColors;
+    currentFollowed = (stored.followedLists || {}) as FollowedLists;
     render(
         stored.syncState as SyncState | undefined,
         (stored.listCache || {}) as ListCache,
@@ -542,6 +580,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         || key === 'lastSync'
         || key === 'lastFullSync'
         || key === 'listColors'
+        || key === 'followedLists'
         || key === 'needsFullSync'
         || key === 'hookStatus'
         || key.startsWith('queryId:'),

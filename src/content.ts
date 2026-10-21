@@ -5,7 +5,6 @@ import {
     badgeKind,
     findHandle,
     findHandleForUserId,
-    formatListNames,
     getProfileHandleFromPath,
     getSelfHandle,
 } from './dom-badge';
@@ -18,6 +17,7 @@ import {
     isListMutationMessage,
     isQueryHarvestedMessage,
     storeQueryId,
+    type FollowedLists,
     type ListCache,
     type ListColors,
     type ListMeta,
@@ -26,6 +26,8 @@ import {
 let listCache: ListCache = {};
 let listMeta: ListMeta = {};
 let listColors: ListColors = {};
+// IDs of lists you follow but do not own.
+let followedIds = new Set<string>();
 // The optional "not in any of your lists" marker.
 let showUnlisted = false;
 let synced = false;
@@ -40,6 +42,9 @@ const NAMES_ATTR = 'data-listlens-names';
 const IDS_ATTR = 'data-listlens-ids';
 const MAX_DOTS = 3;
 const UNLISTED_CLASS = 'listlens-unlisted';
+const FOLLOWED_CLASS = 'listlens-followed';
+const NOTE_ATTR = 'data-listlens-note';
+const FOLLOWED_SUFFIX = ' (followed)';
 const UNLISTED_TEXT = 'Not in any of your lists';
 const MAX_ROOTS_PER_FRAME = 40;
 const MAX_PAINT_ATTEMPTS = 10;
@@ -69,10 +74,11 @@ function readMarkerSettings(values: Record<string, unknown>) {
     if ('selfHandle' in values) storedSelfHandle = typeof values.selfHandle === 'string' ? values.selfHandle : undefined;
 }
 
-getLocal(['listCache', 'listMeta', 'listColors', 'showUnlistedMarker', 'lastSync', 'selfHandle']).then((result) => {
+getLocal(['listCache', 'listMeta', 'listColors', 'followedLists', 'showUnlistedMarker', 'lastSync', 'selfHandle']).then((result) => {
     const nextCache: ListCache = result.listCache || {};
     listMeta = result.listMeta || {};
     listColors = result.listColors || {};
+    followedIds = new Set(Object.keys((result.followedLists || {}) as FollowedLists));
     readMarkerSettings(result);
     if (showUnlisted) repaint(null);
     applyCache(nextCache);
@@ -90,8 +96,9 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         readMarkerSettings(markerChanges);
         if (wasShowing || (showUnlisted && synced)) repaint(null);
     }
-    if (changes.listColors) {
-        listColors = (changes.listColors.newValue as ListColors) || {};
+    if (changes.listColors || changes.followedLists) {
+        if (changes.listColors) listColors = (changes.listColors.newValue as ListColors) || {};
+        if (changes.followedLists) followedIds = new Set(Object.keys((changes.followedLists.newValue as FollowedLists) || {}));
         if (!changes.listCache) repaint(null);
     }
     if (!changes.listCache && !changes.listMeta) return;
@@ -167,8 +174,14 @@ function createBadgeIcon() {
     return icon;
 }
 
+// Your own lists first, then lists you follow, each by name.
 function sortByName(listIds: string[]) {
-    return [...listIds].sort((a, b) => (listMeta[a] || a).localeCompare(listMeta[b] || b));
+    return [...listIds].sort((a, b) => Number(followedIds.has(a)) - Number(followedIds.has(b))
+        || (listMeta[a] || a).localeCompare(listMeta[b] || b));
+}
+
+function listLabel(id: string) {
+    return (listMeta[id] || id) + (followedIds.has(id) ? FOLLOWED_SUFFIX : '');
 }
 
 function colorDot(hex: string) {
@@ -203,11 +216,8 @@ function paint(node: HTMLElement): boolean {
     node.setAttribute(HANDLE_ATTR, found.handle);
 
     const listIds = listCache[found.handle];
-    const kind = badgeKind(found.handle, listIds, {
-        selfHandle: getSelfHandle(document, storedSelfHandle),
-        showUnlisted,
-        synced,
-    });
+    const selfHandle = getSelfHandle(document, storedSelfHandle);
+    const kind = badgeKind(found.handle, listIds, { selfHandle, showUnlisted, synced, followedIds });
     if (kind === 'none') return true;
 
     const badge = document.createElement('button');
@@ -222,10 +232,19 @@ function paint(node: HTMLElement): boolean {
         badge.append(createBadgeIcon());
     } else {
         const ordered = sortByName(listIds);
-        const names = formatListNames(ordered, listMeta);
+        const names = ordered.map(listLabel).join(', ');
+        if (kind === 'followed') {
+            badge.classList.add(FOLLOWED_CLASS);
+            // Not on any of YOUR lists: with the marker on, say so first.
+            if (showUnlisted && synced && found.handle !== selfHandle) {
+                badge.classList.add(UNLISTED_CLASS);
+                badge.setAttribute(NOTE_ATTR, `${UNLISTED_TEXT}. In lists you follow:`);
+            }
+        }
         badge.setAttribute(NAMES_ATTR, names);
         badge.setAttribute(IDS_ATTR, ordered.join(','));
-        badge.setAttribute('aria-label', `In ${listIds.length} ${listIds.length === 1 ? 'list' : 'lists'}: ${names}`);
+        const note = badge.getAttribute(NOTE_ATTR);
+        badge.setAttribute('aria-label', `${note ? `${note} ` : ''}In ${listIds.length} ${listIds.length === 1 ? 'list' : 'lists'}: ${names}`);
         const count = document.createElement('span');
         count.className = 'listlens-badge-count';
         count.textContent = String(listIds.length);
@@ -292,12 +311,18 @@ function showTip(badge: HTMLElement) {
     if (ids.length === 0) {
         tip.textContent = names;
     } else {
+        const note = badge.getAttribute(NOTE_ATTR);
+        if (note) {
+            const line = document.createElement('div');
+            line.textContent = note;
+            tip.appendChild(line);
+        }
         for (const id of ids) {
             const line = document.createElement('div');
             line.className = 'listlens-tip-line';
             const color = listColor(listColors[id]);
             if (color) line.appendChild(colorDot(color.hex));
-            line.append(listMeta[id] || id);
+            line.append(listLabel(id));
             tip.appendChild(line);
         }
     }

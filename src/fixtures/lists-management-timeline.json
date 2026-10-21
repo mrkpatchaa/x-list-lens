@@ -329,6 +329,51 @@
                             }
                           }
                         }
+                      },
+                      {
+                        "entryId": "owned-subscribed-list-module-0-list-5001",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithPin",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": true,
+                              "id": "TGlzdDo1MDAx",
+                              "id_str": "5001",
+                              "is_member": false,
+                              "member_count": 7,
+                              "members_context": "7 members",
+                              "mode": "Public",
+                              "muting": false,
+                              "name": "Followed demo",
+                              "pinning": false,
+                              "subscriber_count": 12,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "Other Owner",
+                                    "screen_name": "other_owner"
+                                  },
+                                  "rest_id": "2003"
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "_synthetic": true
                       }
                     ]
                   },

@@ -30,6 +30,10 @@
   outline-offset: 2px;
 }
 
+.listlens-badge.listlens-followed {
+  background: transparent;
+}
+
 .listlens-badge.listlens-unlisted {
   min-width: 18px;
   padding: 0 3px;

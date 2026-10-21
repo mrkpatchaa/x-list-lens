@@ -81,4 +81,10 @@ describe('badgeKind', () => {
         expect(getSelfHandle(document, 'Stored_One')).toBe('stored_one')
         expect(getSelfHandle(document)).toBeUndefined()
     })
+
+    it('tells lists you follow apart from your own', () => {
+        const o = { selfHandle: 'mrk', showUnlisted: false, synced: true, followedIds: new Set(['5001']) }
+        expect(badgeKind('bob', ['5001'], o)).toBe('followed')
+        expect(badgeKind('bob', ['5001', '1'], o)).toBe('listed')
+    })
 })

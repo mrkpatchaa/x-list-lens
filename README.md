@@ -96,7 +96,7 @@ After setup, hit **Sync lists**. A full sync can take a few minutes for large li
 - **The cache goes stale.** Changes made from another device or the mobile app won’t show until you re-sync. The popup nudges you after a week.
 - **Large lists are expensive to re-read during a full sync.** Confirmed add/remove changes are applied locally, but a user not yet present in the `userId → handle` index requires a full sync to establish the mapping.
 - **A fast sync can miss a swap.** When one person leaves a list and another joins, the member count does not change. Run a full sync to catch it.
-- Only your own lists — not lists you merely follow.
+- **Lists you follow are off by default.** The popup lists them under **Lists you follow**. Tick **Include** on a list, then sync, to show it on badges. A person who is only in lists you follow gets an outline badge, and the tooltip marks those lists with “(followed)”. A followed list can be large, so each one you include makes a full sync longer.
 - **Safari is less tested than Chrome.** Safari asks for site access per site, may stop the background worker during a long sync (the popup then reports the sync as interrupted), and is known to leave some cookies off extension requests ([WebKit bug 260676](https://bugs.webkit.org/show_bug.cgi?id=260676)). When X rejects a request, the popup shows X's own error code, such as 353 for a missing CSRF cookie.
 
 ## Project layout

@@ -1,5 +1,6 @@
 import {
     getLocal,
+    type FollowedLists,
     type ListCache,
     type ListColors,
     type ListCounts,
@@ -136,9 +137,10 @@ async function fetchOwnedLists(
     queryId: string,
     operation: 'ListsManagementPageTimeline' | 'ListOwnerships',
     deps: SyncDeps,
-): Promise<OwnedListSummary[]> {
+): Promise<ListsRead> {
     const { currentUserId, signal, isCancelled: cancelled } = deps;
     console.info(`[ListLens:Background] Reading lists via ${operation}…`);
+    const followed = new Map<string, OwnedListSummary>();
     const lists = await collectListPages(async (cursor) => {
         if (cancelled() || signal?.aborted) throw createAbortError();
         const variables = operation === 'ListOwnerships'
@@ -146,16 +148,22 @@ async function fetchOwnedLists(
             : JSON.stringify({ count: PAGE_SIZE, ...(cursor ? { cursor } : {}) });
         const url = `https://x.com/i/api/graphql/${queryId}/${operation}?variables=${encodeURIComponent(variables)}`;
         const payload = await deps.fetchJson(url, signal);
-        return operation === 'ListOwnerships'
+        const page = operation === 'ListOwnerships'
             ? parseOwnedListsPage(payload, currentUserId)
             : parseListManagementPage(payload, currentUserId);
+        for (const list of page.followed) followed.set(list.id, list);
+        return page;
     });
 
-    console.info(`[ListLens:Background] ${operation} returned ${lists.length} owned lists.`);
-    return lists;
+    console.info(`[ListLens:Background] ${operation} returned ${lists.length} owned and ${followed.size} followed lists.`);
+    return { owned: lists, followed: [...followed.values()], followedKnown: operation === 'ListsManagementPageTimeline' };
 }
 
-async function readOwnedLists(deps: SyncDeps): Promise<OwnedListSummary[]> {
+// `followedKnown` is false on the ListOwnerships fallback, which cannot see
+// followed lists. The stored followed lists are then kept as they are.
+type ListsRead = { owned: OwnedListSummary[]; followed: OwnedListSummary[]; followedKnown: boolean };
+
+async function readLists(deps: SyncDeps): Promise<ListsRead> {
     try {
         return await fetchOwnedLists(deps.queryIds.lists, 'ListsManagementPageTimeline', deps);
     } catch (managementError) {
@@ -165,12 +173,22 @@ async function readOwnedLists(deps: SyncDeps): Promise<OwnedListSummary[]> {
     }
 }
 
+// Keeps each list's "included" choice. Only included followed lists are read.
+function nextFollowedLists(read: ListsRead, stored: FollowedLists): FollowedLists {
+    if (!read.followedKnown) return stored;
+    return Object.fromEntries(read.followed.map((list) => [list.id, {
+        name: list.name,
+        included: stored[list.id]?.included === true,
+        ...(list.memberCount !== undefined ? { memberCount: list.memberCount } : {}),
+    }]));
+}
+
 // Returns 'cancelled' when the user stopped the sync. The previous cache is
 // then left untouched rather than replaced by a partial one.
 export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'done' | 'cancelled'> {
     await setSyncState({ status: 'running', done: 0, total: 0 });
 
-    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles', 'listColors']);
+    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles', 'listColors', 'followedLists']);
     // A fast sync builds on a complete full sync. Without one, read everything.
     const mode: SyncMode = requested === 'fast'
         && typeof stored.lastFullSync === 'number'
@@ -179,7 +197,13 @@ export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'don
         ? 'fast'
         : 'full';
 
-    const lists = await readOwnedLists(deps);
+    const read = await readLists(deps);
+    const followedLists = nextFollowedLists(read, (stored.followedLists || {}) as FollowedLists);
+    const ownedIds = new Set(read.owned.map((list) => list.id));
+    const includedFollowed: OwnedListSummary[] = Object.entries(followedLists)
+        .filter(([id, list]) => list.included && !ownedIds.has(id))
+        .map(([id, list]) => ({ id, name: list.name, memberCount: list.memberCount }));
+    const lists = [...read.owned, ...includedFollowed];
     const listMeta: ListMeta = {};
     const listCounts: ListCounts = {};
     for (const list of lists) {
@@ -215,13 +239,14 @@ export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'don
     const previousCache = mode === 'fast' ? (stored.listCache || {}) as ListCache : {};
     const listCache = buildNextCache(previousCache, keepIds, fresh);
     const now = Date.now();
-    const selfHandle = lists.find((list) => list.ownerHandle)?.ownerHandle;
+    const selfHandle = read.owned.find((list) => list.ownerHandle)?.ownerHandle;
     // A list deleted on X takes its color with it.
     const listColors = stored.listColors
         ? Object.fromEntries(Object.entries(stored.listColors as ListColors).filter(([id]) => id in listMeta))
         : undefined;
     await chrome.storage.local.set({
         ...(listColors ? { listColors } : {}),
+        followedLists,
         listCache,
         listMeta,
         listCounts,
