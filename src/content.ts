@@ -80,8 +80,9 @@ getLocal(['listCache', 'listMeta', 'listColors', 'followedLists', 'showUnlistedM
     listColors = result.listColors || {};
     followedIds = new Set(Object.keys((result.followedLists || {}) as FollowedLists));
     readMarkerSettings(result);
-    if (showUnlisted) repaint(null);
-    applyCache(nextCache);
+    // Set the cache before painting, so listed people never flash the marker.
+    listCache = nextCache;
+    repaint(null);
 });
 
 chrome.storage.onChanged.addListener((changes, namespace) => {

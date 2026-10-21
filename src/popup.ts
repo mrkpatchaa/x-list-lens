@@ -14,7 +14,7 @@ import {
     type SyncState,
 } from './shared';
 import { LIST_COLORS, listColor } from './palette';
-import { buildExportFile, downloadBlob, needsExportTab, type ExportFormat } from './export-download';
+import { buildExportFile, downloadAndRelease, needsExportTab, type ExportFormat } from './export-download';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -170,29 +170,115 @@ function createSwatch(id: string, name: string) {
     return swatch;
 }
 
+// One list row: color swatch, name with member count (click to expand), Open.
+function createListItem(cache: ListCache, id: string, name: string, count: number) {
+    const item = document.createElement('div');
+    item.setAttribute('role', 'listitem');
+    item.className = 'rounded-lg';
+
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-1';
+
+    row.appendChild(createSwatch(id, name));
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+    toggle.setAttribute('aria-expanded', String(expandedListId === id));
+    toggle.title = expandedListId === id ? `Hide members in ${name}` : `Show members in ${name}`;
+
+    const label = document.createElement('span');
+    label.className = 'min-w-0 truncate text-xs font-medium text-slate-200';
+    label.textContent = name;
+    const countLabel = document.createElement('span');
+    countLabel.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
+    countLabel.textContent = plural(count, 'person', 'people');
+    toggle.append(label, countLabel, createChevron(expandedListId === id));
+    toggle.addEventListener('click', () => {
+        expandedListId = expandedListId === id ? null : id;
+        renderLists(currentCache, currentMeta);
+    });
+    row.appendChild(toggle);
+
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'shrink-0 rounded-md px-2 py-1.5 text-[11px] text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+    open.textContent = 'Open';
+    open.title = `Open ${name} on X`;
+    open.addEventListener('click', () => {
+        void chrome.tabs.create({ url: `https://x.com/i/lists/${encodeURIComponent(id)}` });
+        window.close();
+    });
+    row.appendChild(open);
+    item.appendChild(row);
+
+    if (expandedListId === id) {
+        const members = membersForList(cache, id);
+        const memberList = document.createElement('div');
+        memberList.className = 'ml-2 mt-1 max-h-24 space-y-0.5 overflow-y-auto border-l border-slate-800 pl-2';
+        if (members.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'px-2 py-1.5 text-[11px] text-slate-500';
+            empty.textContent = 'No cached members.';
+            memberList.appendChild(empty);
+        } else {
+            for (const handle of members.slice(0, MAX_VISIBLE_MEMBERS)) {
+                const member = document.createElement('button');
+                member.type = 'button';
+                member.className = 'block w-full rounded-md px-2 py-1 text-left text-[11px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
+                member.textContent = `@${handle}`;
+                member.addEventListener('click', () => {
+                    void chrome.tabs.create({ url: `https://x.com/${encodeURIComponent(handle)}` });
+                    window.close();
+                });
+                memberList.appendChild(member);
+            }
+            if (members.length > MAX_VISIBLE_MEMBERS) {
+                const more = document.createElement('p');
+                more.className = 'px-2 py-1.5 text-[11px] text-slate-500';
+                more.textContent = `+${members.length - MAX_VISIBLE_MEMBERS} more`;
+                memberList.appendChild(more);
+            }
+        }
+        item.appendChild(memberList);
+    }
+
+    return item;
+}
+
 function renderFollowed() {
     const entries = Object.entries(currentFollowed).sort(([, a], [, b]) => a.name.localeCompare(b.name));
     followedGroup.classList.toggle('hidden', entries.length === 0);
     followedList.replaceChildren();
     for (const [id, list] of entries) {
-        const row = document.createElement('label');
-        row.className = 'flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-slate-800/80';
         const box = document.createElement('input');
         box.type = 'checkbox';
         box.checked = list.included;
-        box.className = 'h-3.5 w-3.5 shrink-0 accent-blue-500';
+        box.className = 'ml-1 h-3.5 w-3.5 shrink-0 accent-blue-500';
         box.setAttribute('aria-label', `Include ${list.name}`);
+        box.title = 'Include on badges';
         box.addEventListener('change', () => {
             currentFollowed = { ...currentFollowed, [id]: { ...list, included: box.checked } };
             void chrome.storage.local.set({ followedLists: currentFollowed });
         });
+
+        // An included, synced list gets the same row as your own lists.
+        if (list.included && id in currentMeta) {
+            const item = createListItem(currentCache, id, list.name, membersForList(currentCache, id).length);
+            item.firstElementChild?.prepend(box);
+            followedList.appendChild(item);
+            continue;
+        }
+
+        const row = document.createElement('label');
+        row.className = 'flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-xs hover:bg-slate-800/80';
         const name = document.createElement('span');
         name.className = 'min-w-0 flex-1 truncate text-slate-200';
         name.textContent = list.name;
         row.append(box, name);
         if (list.memberCount !== undefined) {
             const count = document.createElement('span');
-            count.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
+            count.className = 'shrink-0 pr-2 text-[11px] tabular-nums text-slate-500';
             count.textContent = plural(list.memberCount, 'member');
             row.appendChild(count);
         }
@@ -201,7 +287,6 @@ function renderFollowed() {
 }
 
 function renderLists(cache: ListCache, meta: ListMeta) {
-    renderFollowed();
     // Followed lists you include sit in listMeta too, but have their own group.
     const entries = Object.entries(meta)
         .filter(([id]) => !(id in currentFollowed))
@@ -218,80 +303,8 @@ function renderLists(cache: ListCache, meta: ListMeta) {
         ? 'No synced lists yet.'
         : 'No lists match that filter.';
 
-    for (const { id, name, count } of filtered) {
-        const item = document.createElement('div');
-        item.setAttribute('role', 'listitem');
-        item.className = 'rounded-lg';
-
-        const row = document.createElement('div');
-        row.className = 'flex items-center gap-1';
-
-        row.appendChild(createSwatch(id, name));
-
-        const toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-slate-800/80 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
-        toggle.setAttribute('aria-expanded', String(expandedListId === id));
-        toggle.title = expandedListId === id ? `Hide members in ${name}` : `Show members in ${name}`;
-
-        const label = document.createElement('span');
-        label.className = 'min-w-0 truncate text-xs font-medium text-slate-200';
-        label.textContent = name;
-        const countLabel = document.createElement('span');
-        countLabel.className = 'shrink-0 text-[11px] tabular-nums text-slate-500';
-        countLabel.textContent = plural(count, 'person', 'people');
-        toggle.append(label, countLabel, createChevron(expandedListId === id));
-        toggle.addEventListener('click', () => {
-            expandedListId = expandedListId === id ? null : id;
-            renderLists(currentCache, currentMeta);
-        });
-        row.appendChild(toggle);
-
-        const open = document.createElement('button');
-        open.type = 'button';
-        open.className = 'shrink-0 rounded-md px-2 py-1.5 text-[11px] text-slate-500 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
-        open.textContent = 'Open';
-        open.title = `Open ${name} on X`;
-        open.addEventListener('click', () => {
-            void chrome.tabs.create({ url: `https://x.com/i/lists/${encodeURIComponent(id)}` });
-            window.close();
-        });
-        row.appendChild(open);
-        item.appendChild(row);
-
-        if (expandedListId === id) {
-            const members = membersForList(cache, id);
-            const memberList = document.createElement('div');
-            memberList.className = 'ml-2 mt-1 max-h-24 space-y-0.5 overflow-y-auto border-l border-slate-800 pl-2';
-            if (members.length === 0) {
-                const empty = document.createElement('p');
-                empty.className = 'px-2 py-1.5 text-[11px] text-slate-500';
-                empty.textContent = 'No cached members.';
-                memberList.appendChild(empty);
-            } else {
-                for (const handle of members.slice(0, MAX_VISIBLE_MEMBERS)) {
-                    const member = document.createElement('button');
-                    member.type = 'button';
-                    member.className = 'block w-full rounded-md px-2 py-1 text-left text-[11px] text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400';
-                    member.textContent = `@${handle}`;
-                    member.addEventListener('click', () => {
-                        void chrome.tabs.create({ url: `https://x.com/${encodeURIComponent(handle)}` });
-                        window.close();
-                    });
-                    memberList.appendChild(member);
-                }
-                if (members.length > MAX_VISIBLE_MEMBERS) {
-                    const more = document.createElement('p');
-                    more.className = 'px-2 py-1.5 text-[11px] text-slate-500';
-                    more.textContent = `+${members.length - MAX_VISIBLE_MEMBERS} more`;
-                    memberList.appendChild(more);
-                }
-            }
-            item.appendChild(memberList);
-        }
-
-        listsList.appendChild(item);
-    }
+    for (const { id, name, count } of filtered) listsList.appendChild(createListItem(cache, id, name, count));
+    renderFollowed();
 }
 
 listsSearch.addEventListener('input', () => {
@@ -434,7 +447,7 @@ function render(
     const lastFull = lastFullSync ?? lastSync;
     const stale = lastFull !== undefined && Date.now() - lastFull > STALE_AFTER_MS;
     if (needsFullSync) {
-        hintMsg.textContent = 'A list change could not be matched to a cached profile. Run a full sync when convenient.';
+        hintMsg.textContent = 'A list change could not be matched to a cached profile. Sync again to fix it.';
         show(hintMsg, true);
     } else if (cancelled) {
         hintMsg.textContent = 'Sync stopped. Your previous badges are still available.';
@@ -449,7 +462,9 @@ function render(
         hintMsg.textContent = 'Your last full sync is over a week old — run a full sync to catch changes made elsewhere.';
         show(hintMsg, true);
     } else if (done?.mode === 'fast' && done.changedCount !== undefined) {
-        hintMsg.textContent = `${numberFormat.format(done.changedCount)} of ${plural(done.listCount ?? 0, 'list')} changed.`;
+        hintMsg.textContent = done.changedCount === 0
+            ? 'No list changed since the last sync.'
+            : `${plural(done.changedCount, 'list')} changed since the last sync.`;
         show(hintMsg, true);
     } else {
         show(hintMsg, false);
@@ -527,7 +542,7 @@ function exportLists(format: ExportFormat) {
         return;
     }
     void buildExportFile(format)
-        .then(({ name, blob }) => { downloadBlob(name, blob); })
+        .then(({ name, blob }) => downloadAndRelease(name, blob))
         .catch(() => {
             errorMsg.textContent = 'ListLens could not build the export. Try again.';
             show(errorMsg, true);

@@ -26,6 +26,12 @@ export function downloadBlob(name: string, blob: Blob): HTMLAnchorElement {
     return link
 }
 
+// The popup downloads at once and needs no visible link afterwards.
+export function downloadAndRelease(name: string, blob: Blob): void {
+    const link = downloadBlob(name, blob)
+    setTimeout(() => URL.revokeObjectURL(link.href), 60_000)
+}
+
 // Safari's popup closes before a download starts and Safari has no downloads
 // API, so Safari downloads from a full extension tab instead.
 export function needsExportTab(userAgent = navigator.userAgent): boolean {

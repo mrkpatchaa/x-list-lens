@@ -31,6 +31,7 @@
 }
 
 .listlens-badge.listlens-followed {
+  border-style: dashed;
   background: transparent;
 }
 
