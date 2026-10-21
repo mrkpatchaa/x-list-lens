@@ -111,6 +111,9 @@ export type ListCache = Record<string, string[]>;
 export type UserHandleIndex = Record<string, string>;
 // List ID -> current display name.
 export type ListMeta = Record<string, string>;
+// List ID -> X's member count at the last sync. A fast sync re-reads only lists whose count changed.
+export type ListCounts = Record<string, number>;
+export type SyncMode = 'fast' | 'full';
 
 export type SyncErrorCode =
     | 'auth'
@@ -129,7 +132,7 @@ export type SyncErrorCode =
 export type SyncState =
     | { status: 'idle' }
     | { status: 'running'; runId?: string; done: number; total: number; list?: string; cancelRequested?: boolean }
-    | { status: 'done'; at?: number; listCount?: number; peopleCount?: number }
+    | { status: 'done'; at?: number; listCount?: number; peopleCount?: number; mode?: SyncMode; changedCount?: number }
     | { status: 'cancelled'; at?: number }
     | { status: 'error'; at?: number; error: string; code?: SyncErrorCode };
 
