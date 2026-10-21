@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BADGE_TARGET_SELECTOR, findHandle, formatListNames, getProfileHandleFromPath } from './dom-badge'
+import { BADGE_TARGET_SELECTOR, findHandle, findHandleForUserId, formatListNames, getProfileHandleFromPath } from './dom-badge'
 
 describe('badge target selection', () => {
     it('includes the profile header used above the feed', () => {
@@ -48,5 +48,17 @@ describe('findHandle', () => {
 describe('formatListNames', () => {
     it('uses display names and falls back safely to IDs', () => {
         expect(formatListNames(['1', '2'], { '1': 'Design' })).toBe('Design, 2')
+    })
+})
+
+describe('findHandleForUserId', () => {
+    it('reads the handle from the follow button that carries the user ID', () => {
+        document.body.innerHTML = `
+            <button data-testid="98808847-follow" aria-label="Follow @someone_else"></button>
+            <button data-testid="10141756581996134400-follow" aria-label="Follow @longer_id"></button>
+            <button data-testid="1014175658199613440-unfollow" aria-label="Following @SantoshYadavDev"></button>`
+
+        expect(findHandleForUserId(document, '1014175658199613440')).toBe('santoshyadavdev')
+        expect(findHandleForUserId(document, '42')).toBeUndefined()
     })
 })

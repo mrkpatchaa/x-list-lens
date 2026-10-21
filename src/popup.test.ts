@@ -5,6 +5,7 @@ import { MSG } from './shared'
 function installChromeMock(
     queryIds: Record<string, string> = { 'queryId:ListsManagementPageTimeline': 'lists-query' },
     overrides: Record<string, unknown> = {},
+    workerRunning = true,
 ) {
     const storage: Record<string, unknown> = {
         listCache: {},
@@ -26,7 +27,9 @@ function installChromeMock(
             onChanged: { addListener: vi.fn() },
         },
         runtime: {
-            sendMessage: vi.fn(async () => ({ status: 'started' })),
+            sendMessage: vi.fn(async (message: { type: string }) => (
+                message.type === MSG.SYNC_STATUS ? { running: workerRunning } : { status: 'started' }
+            )),
         },
         tabs: {
             create: vi.fn(async () => undefined),
@@ -103,6 +106,22 @@ describe('popup states', () => {
         expect(document.getElementById('progressLabel')?.textContent).toBe('Stopping…');
         expect(cancel.disabled).toBe(true);
     })
+
+    it('reports a sync as interrupted when the worker restarted mid-sync', async () => {
+        vi.resetModules();
+        installChromeMock({
+            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListMembers': 'members-query',
+        }, {
+            syncState: { status: 'running', done: 1, total: 3, list: 'Design' },
+        }, false);
+        await import('./popup');
+        await vi.waitFor(() => expect(document.getElementById('errorMsg')?.textContent)
+            .toContain('background service restarted'));
+
+        expect(document.getElementById('cancelBtn')?.classList.contains('hidden')).toBe(true);
+        expect(document.getElementById('syncLabel')?.textContent).toBe('Try again');
+    });
 
     it('enables syncing after both required queries are present', async () => {
         vi.resetModules();

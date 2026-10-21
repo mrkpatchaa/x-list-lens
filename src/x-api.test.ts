@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
     XApiError,
+    errorFromResponse,
     parseListsPage,
     parseMembersPage,
     replaceListMembership,
@@ -203,5 +204,18 @@ describe('replaceListMembership', () => {
         const cache = { alice: ['1'] }
         replaceListMembership(cache, '1', new Set())
         expect(cache).toEqual({ alice: ['1'] })
+    })
+})
+
+describe('errorFromResponse', () => {
+    it('classifies X failures and keeps X’s own error code', async () => {
+        const csrf = new Response(JSON.stringify({ errors: [{ code: 353, message: 'This request requires a matching csrf cookie and header.' }] }), { status: 403 })
+        const error = await errorFromResponse(csrf, 'ListMembers')
+        expect(error.kind).toBe('auth')
+        expect(error.message).toBe('HTTP 403 (X error 353: This request requires a matching csrf cookie and header.)')
+
+        expect((await errorFromResponse(new Response('slow down', { status: 429 }))).kind).toBe('rate_limit')
+        expect((await errorFromResponse(new Response('', { status: 503 }))).kind).toBe('server')
+        expect((await errorFromResponse(new Response('', { status: 404 }))).kind).toBe('http')
     })
 })

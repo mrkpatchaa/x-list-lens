@@ -3,12 +3,15 @@ import {
     BADGE_TARGET_SELECTOR,
     PROFILE_HEADER_SELECTOR,
     findHandle,
+    findHandleForUserId,
     formatListNames,
     getProfileHandleFromPath,
 } from './dom-badge';
+import { applyListMutationToStorage } from './cache-delta';
 import {
-    MSG,
+    HOOKS_ATTR,
     getLocal,
+    type HookStatus,
     isListMutationMessage,
     isQueryHarvestedMessage,
     storeQueryId,
@@ -36,6 +39,16 @@ function findHandleForNode(node: HTMLElement) {
 }
 
 console.info('[ListLens:Content] Content script loaded.');
+
+// intercept.ts marks the page with the world it ran in. Record it so the popup
+// can explain a setup that never completes (for example, a browser that runs
+// the interceptor isolated from X's own requests, or not at all).
+const hookWorld = document.documentElement.getAttribute(HOOKS_ATTR);
+const hookStatus: HookStatus = hookWorld === 'main' || hookWorld === 'isolated' ? hookWorld : 'missing';
+if (hookStatus !== 'main') console.warn(`[ListLens:Content] Request hooks status: ${hookStatus}.`);
+getLocal(['hookStatus']).then((stored) => {
+    if (stored.hookStatus !== hookStatus) return chrome.storage.local.set({ hookStatus });
+}).catch(() => { /* extension reloaded */ });
 
 getLocal(['listCache', 'listMeta']).then((result) => {
     const nextCache: ListCache = result.listCache || {};
@@ -67,9 +80,11 @@ window.addEventListener('message', (event) => {
     }
 
     if (isListMutationMessage(event.data)) {
-        void chrome.runtime
-            .sendMessage({ type: MSG.LIST_MUTATION, payload: event.data.payload })
-            .catch(() => { /* service worker asleep or extension reloaded */ });
+        // Repaint here as well: other tabs still update through storage.onChanged.
+        const { userId } = event.data.payload;
+        void applyListMutationToStorage(event.data.payload, findHandleForUserId(document, userId))
+            .then((next) => { if (next) applyCache(next); })
+            .catch((error) => console.error('[ListLens:Content] Could not apply list change', error));
     }
 });
 

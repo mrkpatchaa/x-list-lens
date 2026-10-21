@@ -7,6 +7,7 @@ export const MSG = {
     LIST_MUTATION: 'X_LIST_MUTATION',
     START_SYNC: 'START_SYNC',
     CANCEL_SYNC: 'CANCEL_SYNC',
+    SYNC_STATUS: 'SYNC_STATUS',
 } as const;
 
 export const REQUIRED_OPERATIONS = ['ListsManagementPageTimeline', 'ListMembers'] as const;
@@ -17,6 +18,11 @@ export const HARVESTED_OPERATIONS = [
     'ListRemoveMember',
 ] as const;
 export const LISTS_URL = 'https://x.com/i/lists';
+// Set on <html> by intercept.ts (which repeats the name: it must stay import-free).
+export const HOOKS_ATTR = 'data-listlens-hooks';
+// Where the request hooks ran on the last X page load. Only 'main' can see X's requests.
+export type HookStatus = 'main' | 'isolated' | 'missing';
+export const X_ORIGINS = ['*://*.x.com/*', '*://*.twitter.com/*'];
 export const QUERY_ID_STORAGE_PREFIX = 'queryId:';
 
 export type RequiredOperation = typeof REQUIRED_OPERATIONS[number];

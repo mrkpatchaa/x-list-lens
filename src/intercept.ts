@@ -4,10 +4,13 @@
 // in an async dynamic-import loader, which would leave window.fetch unpatched for
 // the first moments of page load. The type-only import below is fully erased but
 // still fails the build if these names drift from shared.ts.
-import type { MSG } from './shared';
+import type { HOOKS_ATTR as SharedHooksAttr, MSG } from './shared';
 
 const QUERY_HARVESTED: typeof MSG.QUERY_HARVESTED = 'X_QUERY_HARVESTED';
 const LIST_MUTATION: typeof MSG.LIST_MUTATION = 'X_LIST_MUTATION';
+
+const HOOKS_ATTR: typeof SharedHooksAttr = 'data-listlens-hooks';
+const INSTALLED = Symbol.for('listlens.intercept');
 
 const HARVEST_OPERATIONS = ['ListOwnerships', 'ListsManagementPageTimeline', 'ListMembers', 'ListAddMember', 'ListRemoveMember'];
 const GRAPHQL_RE = /\/i\/api\/graphql\/([^/]+)\/([A-Za-z0-9_]+)/;
@@ -113,63 +116,82 @@ function safely(fn: () => void) {
     try { fn(); } catch (error) { console.error('[ListLens:Intercept]', error); }
 }
 
-const originalFetch = window.fetch;
-window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    let body: unknown = null;
-    let watch = false;
+// Tell the content script which world we run in. The DOM is shared by both
+// worlds, but only an isolated content script can see its extension's runtime
+// ID. A browser that ignores `world: "MAIN"` runs us isolated, where patching
+// fetch sees none of X's requests.
+const runtimeId = (globalThis as { chrome?: { runtime?: { id?: string } } }).chrome?.runtime?.id;
+document.documentElement?.setAttribute(HOOKS_ATTR, runtimeId ? 'isolated' : 'main');
 
-    safely(() => {
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        harvestQueryId(url);
-        if (!isListMutation(url)) return;
+const globalState = window as unknown as Record<symbol, boolean>;
+const alreadyInstalled = globalState[INSTALLED] === true;
+globalState[INSTALLED] = true;
 
-        watch = true;
-        // Read the body before handing the Request to fetch; fetch consumes it.
-        body = init?.body ?? (input instanceof Request ? input.clone().text() : null);
-    });
+// Guard against a second copy (for example, a fallback injection) wrapping
+// fetch twice and reporting every request twice.
+function installHooks() {
+    const originalFetch = window.fetch;
+    window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+        let body: unknown = null;
+        let watch = false;
 
-    const response = originalFetch.call(window, input, init);
+        safely(() => {
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+            harvestQueryId(url);
+            if (!isListMutation(url)) return;
 
-    if (watch) {
-        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        Promise.all([response, body])
-            .then(async ([resolvedResponse, resolvedBody]) => {
-                if (!resolvedResponse.ok) return;
-                emitMutation(url, resolvedBody, await resolvedResponse.clone().json());
-            })
-            .catch(() => { /* network or non-JSON response - nothing changed */ });
-    }
+            watch = true;
+            // Read the body before handing the Request to fetch; fetch consumes it.
+            body = init?.body ?? (input instanceof Request ? input.clone().text() : null);
+        });
 
-    return response;
-};
+        const response = originalFetch.call(window, input, init);
 
-const originalOpen = XMLHttpRequest.prototype.open;
-const originalSend = XMLHttpRequest.prototype.send;
+        if (watch) {
+            const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+            Promise.all([response, body])
+                .then(async ([resolvedResponse, resolvedBody]) => {
+                    if (!resolvedResponse.ok) return;
+                    emitMutation(url, resolvedBody, await resolvedResponse.clone().json());
+                })
+                .catch(() => { /* network or non-JSON response - nothing changed */ });
+        }
 
-XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
-    xhrUrls.set(this, typeof url === 'string' ? url : url.toString());
-    return originalOpen.apply(this, [method, url, ...rest] as any);
-};
+        return response;
+    };
 
-XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
-    safely(() => {
-        const url = xhrUrls.get(this) || '';
-        if (!url) return;
+    const originalOpen = XMLHttpRequest.prototype.open;
+    const originalSend = XMLHttpRequest.prototype.send;
 
-        harvestQueryId(url);
-        if (!isListMutation(url)) return;
+    XMLHttpRequest.prototype.open = function (method: string, url: string | URL, ...rest: any[]) {
+        xhrUrls.set(this, typeof url === 'string' ? url : url.toString());
+        return originalOpen.apply(this, [method, url, ...rest] as any);
+    };
 
-        this.addEventListener('loadend', () => {
-            if (this.status < 200 || this.status >= 300) return;
-            try {
-                emitMutation(url, body, JSON.parse(this.responseText));
-            } catch {
-                // A non-JSON response is not proof that the mutation succeeded.
-            }
-        }, { once: true });
-    });
+    XMLHttpRequest.prototype.send = function (body?: Document | XMLHttpRequestBodyInit | null) {
+        safely(() => {
+            const url = xhrUrls.get(this) || '';
+            if (!url) return;
 
-    return originalSend.apply(this, [body] as any);
-};
+            harvestQueryId(url);
+            if (!isListMutation(url)) return;
 
-console.log('[ListLens:Intercept] Fetch and XHR hooks installed.');
+            this.addEventListener('loadend', () => {
+                if (this.status < 200 || this.status >= 300) return;
+                try {
+                    // responseText throws when X asks for responseType 'json'.
+                    const responseBody = this.responseType === 'json' ? this.response : JSON.parse(this.responseText);
+                    emitMutation(url, body, responseBody);
+                } catch {
+                    // A non-JSON response is not proof that the mutation succeeded.
+                }
+            }, { once: true });
+        });
+
+        return originalSend.apply(this, [body] as any);
+    };
+
+    console.log('[ListLens:Intercept] Fetch and XHR hooks installed.');
+}
+
+if (!alreadyInstalled) installHooks();

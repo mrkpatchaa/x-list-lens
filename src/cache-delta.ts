@@ -1,4 +1,4 @@
-import type { ListCache } from './shared'
+import { getLocal, type ListCache, type ListMutationMessage, type UserHandleIndex } from './shared'
 
 export function applyMembershipDelta(
     cache: ListCache,
@@ -23,4 +23,28 @@ export function applyMembershipDelta(
     }
 
     return next
+}
+
+// Applied from the content script that saw the mutation, not the service
+// worker: Safari may not wake the worker for it, and the page repaints at once.
+export async function applyListMutationToStorage(
+    payload: ListMutationMessage['payload'],
+    pageHandle?: string,
+): Promise<ListCache | undefined> {
+    const { listCache, userHandles } = await getLocal(['listCache', 'userHandles'])
+    const index = (userHandles || {}) as UserHandleIndex
+    // X's reply rarely names the user, so fall back to the index, then to the page.
+    const handle = payload.handle || index[payload.userId] || pageHandle
+
+    if (!handle) {
+        await chrome.storage.local.set({ needsFullSync: true })
+        console.warn(`[ListLens:Content] No cached handle for user ${payload.userId}; full sync required.`)
+        return undefined
+    }
+
+    const nextCache = applyMembershipDelta((listCache || {}) as ListCache, payload.listId, handle, payload.action)
+    const nextIndex = { ...index, [payload.userId]: handle.toLowerCase() }
+    await chrome.storage.local.set({ listCache: nextCache, userHandles: nextIndex })
+    console.info(`[ListLens:Content] Applied ${payload.action} for @${handle} without refetching the list.`)
+    return nextCache
 }

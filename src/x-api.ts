@@ -31,6 +31,31 @@ export class XApiError extends Error {
     }
 }
 
+export function errorKindForStatus(status: number): XApiErrorKind {
+    if (status === 401 || status === 403) return 'auth'
+    if (status === 429) return 'rate_limit'
+    if (status >= 500) return 'server'
+    return 'http'
+}
+
+// Keep X's own error code (for example 353, a CSRF cookie/header mismatch)
+// so the popup can tell a signed-out user from a browser that drops cookies.
+export async function errorFromResponse(response: Response, operation?: string): Promise<XApiError> {
+    let detail = ''
+    try {
+        const body: unknown = await response.json()
+        const first = isRecord(body) && Array.isArray(body.errors) ? body.errors[0] : undefined
+        if (isRecord(first)) {
+            const code = typeof first.code === 'number' ? ` ${first.code}` : ''
+            const message = typeof first.message === 'string' ? `: ${first.message.slice(0, 160)}` : ''
+            detail = ` (X error${code}${message})`
+        }
+    } catch {
+        // Not JSON - the status alone has to do.
+    }
+    return new XApiError(`HTTP ${response.status}${detail}`, errorKindForStatus(response.status), operation)
+}
+
 type JsonRecord = Record<string, unknown>
 type ListSummary = { id: string; name: string }
 

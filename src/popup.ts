@@ -1,9 +1,11 @@
 import {
     MSG,
+    X_ORIGINS,
     getLocal,
     getMissingOperations,
     getStoredQueryIds,
     type ListCache,
+    type HookStatus,
     type ListMeta,
     type QueryIds,
     type SyncState,
@@ -12,8 +14,10 @@ import {
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const syncBtn = el<HTMLButtonElement>('syncBtn');
+const syncLabel = el<HTMLSpanElement>('syncLabel');
 const cancelBtn = el<HTMLButtonElement>('cancelBtn');
 const openListsBtn = el<HTMLButtonElement>('openListsBtn');
+const openListsLabel = el<HTMLSpanElement>('openListsLabel');
 const reconnectBtn = el<HTMLButtonElement>('reconnectBtn');
 const setupNotice = el<HTMLDivElement>('setupNotice');
 const setupEyebrow = el<HTMLParagraphElement>('setupEyebrow');
@@ -67,7 +71,7 @@ function plural(count: number, singular: string, pluralForm = `${singular}s`) {
 function friendlyError(state: Extract<SyncState, { status: 'error' }>) {
     switch (state.code) {
         case 'auth':
-            return 'You are signed out of X. Sign in, then try again.';
+            return 'X did not accept your session. Sign in to X in this browser, then try again.';
         case 'setup':
         case 'contract':
         case 'graphql':
@@ -224,7 +228,33 @@ listsSearch.addEventListener('input', () => {
     renderLists(currentCache, currentMeta);
 });
 
-function renderSetup(queryIds: QueryIds) {
+// Chrome grants host access at install. Safari asks the user per site, and
+// until then nothing runs on x.com and setup can never finish.
+type Environment = { hostAccess: boolean; hookStatus?: HookStatus };
+let setupAction: 'openLists' | 'grantAccess' = 'openLists';
+
+async function hasHostAccess(): Promise<boolean> {
+    if (!chrome.permissions?.contains) return true;
+    try {
+        return await chrome.permissions.contains({ origins: ['https://x.com/*'] });
+    } catch {
+        return true;
+    }
+}
+
+function renderSetup(queryIds: QueryIds, env: Environment) {
+    if (!env.hostAccess) {
+        setupAction = 'grantAccess';
+        setupEyebrow.textContent = 'Permission needed';
+        setupTitle.textContent = 'Allow ListLens on x.com';
+        setupCopy.textContent = 'Your browser has not given ListLens access to x.com yet. Without it, ListLens cannot learn your Lists or show badges. Choose “Always Allow” when asked.';
+        openListsLabel.textContent = 'Allow on x.com';
+        setupListsStep.className = 'setup-step setup-step-pending';
+        setupListStep.className = 'setup-step setup-step-pending';
+        return;
+    }
+
+    setupAction = 'openLists';
     const missing = getMissingOperations(queryIds);
     const needsListMembers = missing.includes('ListMembers');
     const needsLists = missing.includes('ListsManagementPageTimeline');
@@ -238,7 +268,12 @@ function renderSetup(queryIds: QueryIds) {
         : needsListMembers
             ? 'Open any list from your Lists page so ListLens can learn the member request.'
             : 'Open your Lists page on X once so ListLens can learn the current request format.';
-    openListsBtn.textContent = 'Open Lists on X';
+    openListsLabel.textContent = 'Open Lists on X';
+    if (env.hookStatus === 'isolated' || env.hookStatus === 'missing') {
+        // The content script ran, but the request watcher did not run inside the page.
+        setupEyebrow.textContent = 'Setup is blocked';
+        setupCopy.textContent = 'ListLens is on x.com, but this browser did not let it watch X’s requests. Reload your x.com tabs and try again. If this message stays, this browser cannot run the request watcher yet.';
+    }
 
     setupListsStep.className = needsLists
         ? 'setup-step setup-step-pending'
@@ -255,6 +290,7 @@ function render(
     queryIds: QueryIds,
     lastSync?: number,
     needsFullSync = false,
+    env: Environment = { hostAccess: true },
 ) {
     const people = Object.keys(cache).length;
     const lists = Object.keys(meta).length;
@@ -262,7 +298,7 @@ function render(
     const error = state?.status === 'error' ? state : undefined;
     const done = state?.status === 'done' ? state : undefined;
     const cancelled = state?.status === 'cancelled' ? state : undefined;
-    const ready = getMissingOperations(queryIds).length === 0;
+    const ready = env.hostAccess && getMissingOperations(queryIds).length === 0;
     currentCache = cache;
     currentMeta = meta;
 
@@ -272,7 +308,7 @@ function render(
     renderLists(cache, meta);
     lastSyncEl.textContent = lastSync ? `Last synced ${relativeTime(lastSync)}` : 'Never synced';
 
-    renderSetup(queryIds);
+    renderSetup(queryIds, env);
     show(setupNotice, !ready && !running, 'flex');
     show(progressWrap, running, 'flex');
     show(cancelBtn, running, 'block');
@@ -290,7 +326,7 @@ function render(
         progressLabel.textContent = total
             ? `${completed} of ${total} lists${list ? ` — ${list}` : ''}`
             : 'Reading your Lists…';
-        syncBtn.textContent = 'Syncing…';
+        syncLabel.textContent = 'Syncing…';
         setStatus(cancelRequested ? 'Stopping' : 'Syncing', 'running');
         show(errorMsg, false);
         show(hintMsg, false);
@@ -298,20 +334,21 @@ function render(
     }
 
     if (error) {
-        syncBtn.textContent = 'Try again';
+        syncLabel.textContent = 'Try again';
         setStatus('Needs attention', 'error');
-        errorMsg.textContent = friendlyError(error);
+        const detail = error.code === 'auth' || error.code === 'http' || error.code === 'unknown' ? error.error : '';
+        errorMsg.textContent = friendlyError(error) + (detail ? ` Details: ${detail}` : '');
         show(errorMsg, true);
     } else if (cancelled) {
-        syncBtn.textContent = 'Sync again';
+        syncLabel.textContent = 'Sync again';
         setStatus('Stopped', 'cancelled');
         show(errorMsg, false);
     } else if (done) {
-        syncBtn.textContent = 'Re-sync lists';
+        syncLabel.textContent = 'Re-sync lists';
         setStatus('Synced', 'done');
         show(errorMsg, false);
     } else {
-        syncBtn.textContent = lastSync ? 'Re-sync lists' : 'Sync lists';
+        syncLabel.textContent = lastSync ? 'Re-sync lists' : 'Sync lists';
         setStatus(ready ? 'Ready' : 'Checking', ready ? 'ready' : 'checking');
         show(errorMsg, false);
     }
@@ -326,6 +363,9 @@ function render(
     } else if (done && done.listCount === 0) {
         hintMsg.textContent = 'No lists found. Create a list on X, then sync again.';
         show(hintMsg, true);
+    } else if (ready && (env.hookStatus === 'isolated' || env.hookStatus === 'missing')) {
+        hintMsg.textContent = 'This browser hides X’s requests from ListLens, so list changes you make on X are not picked up. Re-sync after you change a list.';
+        show(hintMsg, true);
     } else if (stale && !error) {
         hintMsg.textContent = 'Your cache is over a week old — re-sync to pick up changes made elsewhere.';
         show(hintMsg, true);
@@ -335,9 +375,10 @@ function render(
 }
 
 async function refresh() {
-    const [stored, queryIds] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'needsFullSync']),
+    const [stored, queryIds, hostAccess] = await Promise.all([
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'needsFullSync', 'hookStatus']),
         getStoredQueryIds(),
+        hasHostAccess(),
     ]);
     render(
         stored.syncState as SyncState | undefined,
@@ -346,7 +387,30 @@ async function refresh() {
         queryIds,
         typeof stored.lastSync === 'number' ? stored.lastSync : undefined,
         stored.needsFullSync === true,
+        { hostAccess, hookStatus: stored.hookStatus as HookStatus | undefined },
     );
+}
+
+// Safari stops idle extension workers more readily than Chrome. If the worker
+// died mid-sync, storage still says "running" and the popup would wait forever.
+async function detectInterruptedSync() {
+    const { syncState } = await getLocal(['syncState']);
+    if ((syncState as SyncState | undefined)?.status !== 'running') return;
+    let running = false;
+    try {
+        const reply = await chrome.runtime.sendMessage({ type: MSG.SYNC_STATUS }) as { running?: boolean } | undefined;
+        running = reply?.running === true;
+    } catch {
+        // No worker answered, so no sync is running.
+    }
+    if (running) return;
+    const interrupted: SyncState = {
+        status: 'error',
+        at: Date.now(),
+        error: 'The background worker stopped during the sync.',
+        code: 'interrupted',
+    };
+    await chrome.storage.local.set({ syncState: interrupted });
 }
 
 function sendMessage(message: { type: string }): Promise<unknown> {
@@ -378,7 +442,20 @@ function openLists() {
     window.close();
 }
 
-openListsBtn.addEventListener('click', openLists);
+function grantAccess() {
+    // Must run inside the click: browsers only show the prompt for a user gesture.
+    void chrome.permissions.request({ origins: X_ORIGINS })
+        .then(() => refresh())
+        .catch(() => {
+            errorMsg.textContent = 'ListLens could not ask for access. Allow it from the browser’s extension settings for x.com.';
+            show(errorMsg, true);
+        });
+}
+
+openListsBtn.addEventListener('click', () => {
+    if (setupAction === 'grantAccess') grantAccess();
+    else openLists();
+});
 reconnectBtn.addEventListener('click', openLists);
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
@@ -389,9 +466,13 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         || key === 'listMeta'
         || key === 'lastSync'
         || key === 'needsFullSync'
+        || key === 'hookStatus'
         || key.startsWith('queryId:'),
     );
     if (relevant) void refresh();
 });
 
-void refresh();
+chrome.permissions?.onAdded?.addListener(() => { void refresh(); });
+chrome.permissions?.onRemoved?.addListener(() => { void refresh(); });
+
+void detectInterruptedSync().finally(() => refresh());

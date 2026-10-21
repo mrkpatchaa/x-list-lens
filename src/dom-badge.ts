@@ -62,3 +62,20 @@ export function findHandle(node: HTMLElement, fallbackHandle?: string): FoundHan
 export function formatListNames(listIds: string[], listMeta: Record<string, string>): string {
     return listIds.map((id) => listMeta[id] || id).join(', ');
 }
+
+const USER_ID_RE = /^\d{1,32}$/;
+const LABEL_HANDLE_RE = /@([A-Za-z0-9_]{1,15})(?![A-Za-z0-9_])/;
+
+// X's follow buttons carry both the user ID and the handle:
+// data-testid="<userId>-follow" (or -unfollow) and aria-label="Follow @handle".
+// Used when a list change names a user that the local index does not know yet.
+export function findHandleForUserId(root: ParentNode, userId: string): string | undefined {
+    if (!USER_ID_RE.test(userId)) return undefined;
+    for (const button of Array.from(root.querySelectorAll(`[data-testid^="${userId}-"]`))) {
+        const testId = button.getAttribute('data-testid') || '';
+        if (testId !== `${userId}-follow` && testId !== `${userId}-unfollow`) continue;
+        const match = button.getAttribute('aria-label')?.match(LABEL_HANDLE_RE);
+        if (match) return match[1].toLowerCase();
+    }
+    return undefined;
+}

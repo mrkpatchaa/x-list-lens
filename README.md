@@ -28,7 +28,7 @@ Five pieces run in separate extension contexts:
 ### Syncing
 
 - **Full sync** — triggered from the popup. Reads the signed-in user’s lists from X’s `ListsManagementPageTimeline` response, filters records by both flat and nested owner IDs, and falls back to `ListOwnerships` only if that response is unusable. It then walks every list and every page of members. It stages the complete result and commits the cache, names, and sync timestamp together only after everything succeeds.
-- **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor confirms the mutation and the service worker applies a local membership delta instead of re-reading the list. A small `userId → handle` index is learned during full sync. If a changed account is not in that index, the extension asks for a manual full sync rather than silently walking a large list.
+- **Targeted sync** — automatic. When you add or remove someone from a list in the X UI, the interceptor confirms the mutation and the content script on that tab applies a local membership delta instead of re-reading the list. It repaints that tab at once, and other tabs update from the storage change. A small `userId → handle` index is learned during full sync. If a changed account is not in that index, the extension asks for a manual full sync rather than silently walking a large list.
 - **Durable recovery** — changed-list work is persisted, and an interrupted service-worker sync is reported as interrupted instead of leaving the popup stuck on “Running.” The previous cache remains available.
 - **Safe cancellation** — cancellation is persisted while a sync is running. Stopping leaves the previous cache intact.
 
@@ -58,6 +58,16 @@ Then in Chrome:
 
 For development with hot reload, use `npm run dev` instead of `npm run build`.
 
+### Safari (testing)
+
+1. Run `npm run build`.
+2. In Safari, open **Settings → Advanced** and turn on **Show features for web developers**.
+3. Allow unsigned extensions when Safari asks (in the **Develop** menu or **Settings → Developer**, depending on the version). Then click **Add Temporary Extension…** and select the `dist/` folder.
+4. Open the ListLens popup. If it shows **Allow ListLens on x.com**, click **Allow on x.com** and choose **Always Allow**. Safari does not grant site access at install, as Chrome does.
+5. Reload any open x.com tabs, then follow **First run** below.
+
+If Safari does not pick up a rebuild, remove the temporary extension and add it again.
+
 ## First run
 
 The extension needs to observe two different X requests before it can sync:
@@ -65,7 +75,7 @@ The extension needs to observe two different X requests before it can sync:
 1. Open your **Lists** page so ListLens can learn the `ListsManagementPageTimeline` request.
 2. Open any one of your lists so ListLens can learn the `ListMembers` request.
 
-The popup shows which setup step is still missing. If X changes its internal request format, the popup preserves the previous cache and offers a Reconnect action instead of silently replacing your badges. After upgrading from the older combined-timeline sync, run one successful full sync to replace any previously cached recommendation lists.
+The popup shows which setup step is still missing. It also says when the browser has not allowed ListLens on x.com, or when the request watcher could not run inside the X page. If X changes its internal request format, the popup preserves the previous cache and offers a Reconnect action instead of silently replacing your badges. After upgrading from the older combined-timeline sync, run one successful full sync to replace any previously cached recommendation lists.
 
 After setup, hit **Sync lists**. A full sync can take a few minutes for large lists; progress and the list currently being read are shown, and you can stop it at any point.
 
@@ -84,6 +94,7 @@ After setup, hit **Sync lists**. A full sync can take a few minutes for large li
 - **Large lists are expensive to re-read during a full sync.** Confirmed add/remove changes are applied locally, but a user not yet present in the `userId → handle` index requires a full sync to establish the mapping.
 - **List renames require a full sync.** Membership changes are detected automatically, but list names are refreshed during a full sync.
 - Only your own lists — not lists you merely follow.
+- **Safari is less tested than Chrome.** Safari asks for site access per site, may stop the background worker during a long sync (the popup then reports the sync as interrupted), and is known to leave some cookies off extension requests ([WebKit bug 260676](https://bugs.webkit.org/show_bug.cgi?id=260676)). When X rejects a request, the popup shows X's own error code, such as 353 for a missing CSRF cookie.
 
 ## Project layout
 

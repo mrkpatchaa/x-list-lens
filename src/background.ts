@@ -2,13 +2,11 @@ import {
     MSG,
     getLocal,
     getStoredQueryIds,
-    isListMutationMessage,
     type ListCache,
     type ListMeta,
     type SyncState,
     type UserHandleIndex,
 } from './shared';
-import { applyMembershipDelta } from './cache-delta';
 import { getUserIdFromTwid } from './list-filter';
 import {
     buildListOwnershipsVariables,
@@ -18,6 +16,8 @@ import {
 } from './list-ownership';
 import { collectListPages } from './list-pages';
 import { createAbortError, waitWithAbort } from './abortable';
+import { XApiError, errorFromResponse } from './x-api';
+import { createErrorState } from './sync-state';
 
 const BEARER_TOKEN = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
@@ -35,15 +35,25 @@ const delay = (ms: number, signal?: AbortSignal) => waitWithAbort(ms, signal);
 // while a sync was running.
 const setSyncState = (syncState: SyncState) => chrome.storage.local.set({ syncState });
 
+async function readXCookie(name: string): Promise<string | undefined> {
+    try {
+        const cookie = await chrome.cookies.get({ url: 'https://x.com', name });
+        return cookie?.value || undefined;
+    } catch (error) {
+        // Safari rejects this when the user has not allowed ListLens on x.com.
+        throw new XApiError(`Could not read the X ${name} cookie: ${String(error)}`, 'auth', undefined, { cause: error });
+    }
+}
+
 async function getCsrfToken(): Promise<string> {
-    const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'ct0' });
-    if (!cookie?.value) throw new Error('Not logged into X');
-    return cookie.value;
+    const value = await readXCookie('ct0');
+    if (!value) throw new XApiError('Not logged into X (no ct0 cookie found).', 'auth');
+    return value;
 }
 
 async function getCurrentUserId(): Promise<string | undefined> {
-    const cookie = await chrome.cookies.get({ url: 'https://x.com', name: 'twid' });
-    return cookie?.value ? getUserIdFromTwid(cookie.value) : undefined;
+    const value = await readXCookie('twid');
+    return value ? getUserIdFromTwid(value) : undefined;
 }
 
 async function getDynamicQueryId(operationName: string): Promise<string> {
@@ -55,7 +65,7 @@ async function getDynamicQueryId(operationName: string): Promise<string> {
             : operationName === 'ListOwnerships'
                 ? 'Open your own profile’s Lists tab on X so we can harvest the ownership request.'
                 : 'Open one of your lists on X so we can harvest the member request.';
-        throw new Error(`${hint} (${operationName})`);
+        throw new XApiError(`${hint} (${operationName})`, 'setup', operationName);
     }
     return queryId;
 }
@@ -103,7 +113,7 @@ async function fetchWithAuth(
         return fetchWithAuth(url, csrfToken, attempt + 1, signal);
     }
 
-    if (!response.ok) throw new Error(`HTTP error: ${response.status}`);
+    if (!response.ok) throw await errorFromResponse(response, new URL(url).pathname.split('/').pop());
     return response.json();
 }
 
@@ -205,41 +215,6 @@ async function fetchListMembers(
 }
 
 // ---------------------------------------------------------
-// TARGETED LIST MUTATIONS
-// Apply the membership delta locally; do not re-walk the whole list.
-// ---------------------------------------------------------
-async function applyListMutation(payload: {
-    listId: string;
-    userId: string;
-    action: 'add' | 'remove';
-    handle?: string;
-}): Promise<void> {
-    try {
-        const { listCache, userHandles } = await getLocal(['listCache', 'userHandles']);
-        const index = (userHandles || {}) as UserHandleIndex;
-        const handle = payload.handle || index[payload.userId];
-
-        if (!handle) {
-            await chrome.storage.local.set({ needsFullSync: true });
-            console.warn(`[ListLens:Background] No cached handle for user ${payload.userId}; full sync required.`);
-            return;
-        }
-
-        const nextCache = applyMembershipDelta(
-            (listCache || {}) as ListCache,
-            payload.listId,
-            handle,
-            payload.action,
-        );
-        const nextIndex = { ...index, [payload.userId]: handle.toLowerCase() };
-        await chrome.storage.local.set({ listCache: nextCache, userHandles: nextIndex });
-        console.info(`[ListLens:Background] Applied ${payload.action} for @${handle} without refetching the list.`);
-    } catch (error) {
-        console.error('[ListLens:Background] Could not apply list mutation', error);
-    }
-}
-
-// ---------------------------------------------------------
 // MAIN FULL SYNC
 // ---------------------------------------------------------
 async function fetchOwnedLists(
@@ -291,7 +266,7 @@ async function syncLists() {
         const membersQueryId = await getDynamicQueryId('ListMembers');
         const currentUserId = await getCurrentUserId();
         if (!currentUserId) {
-            throw new Error('Could not determine the signed-in X user ID. Sign in to X and try again.');
+            throw new XApiError('Could not determine the signed-in X user ID (no twid cookie found).', 'auth');
         }
 
         let lists: OwnedListSummary[];
@@ -381,7 +356,7 @@ async function syncLists() {
             await setSyncState({ status: 'cancelled', at: Date.now() });
         } else {
             console.error('[ListLens:Background] Full sync failed', error);
-            await setSyncState({ status: 'error', error: String(error) });
+            await setSyncState(createErrorState(error));
         }
     } finally {
         fullSyncRunning = false;
@@ -421,12 +396,14 @@ chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
         sendResponse({ status: 'started' });
     }
 
+    if (message?.type === MSG.SYNC_STATUS) {
+        // A worker that just woke up has no sync running, whatever storage says.
+        sendResponse({ running: fullSyncRunning });
+    }
+
     if (message?.type === MSG.CANCEL_SYNC) {
         void requestSyncCancellation();
         sendResponse({ status: 'cancelling' });
     }
 
-    if (isListMutationMessage(message)) {
-        void applyListMutation(message.payload);
-    }
 });
