@@ -51,6 +51,19 @@
   flex: 0 0 auto;
 }
 
+.listlens-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.listlens-tip-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .listlens-badge-count {
   font-variant-numeric: tabular-nums;
 }
@@ -90,5 +103,9 @@
   .listlens-badge.listlens-unlisted {
     border-style: dashed;
     opacity: 1;
+  }
+
+  .listlens-dot {
+    display: none;
   }
 }

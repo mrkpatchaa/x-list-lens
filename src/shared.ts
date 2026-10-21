@@ -114,6 +114,8 @@ export type ListMeta = Record<string, string>;
 // List ID -> X's member count at the last sync. A fast sync re-reads only lists whose count changed.
 export type ListCounts = Record<string, number>;
 export type SyncMode = 'fast' | 'full';
+// List ID -> index into LIST_COLORS. Lists start with no color.
+export type ListColors = Record<string, number>;
 
 export type SyncErrorCode =
     | 'auth'

@@ -1,6 +1,7 @@
 import {
     getLocal,
     type ListCache,
+    type ListColors,
     type ListCounts,
     type ListMeta,
     type SyncMode,
@@ -169,7 +170,7 @@ async function readOwnedLists(deps: SyncDeps): Promise<OwnedListSummary[]> {
 export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'done' | 'cancelled'> {
     await setSyncState({ status: 'running', done: 0, total: 0 });
 
-    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles']);
+    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles', 'listColors']);
     // A fast sync builds on a complete full sync. Without one, read everything.
     const mode: SyncMode = requested === 'fast'
         && typeof stored.lastFullSync === 'number'
@@ -215,7 +216,12 @@ export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'don
     const listCache = buildNextCache(previousCache, keepIds, fresh);
     const now = Date.now();
     const selfHandle = lists.find((list) => list.ownerHandle)?.ownerHandle;
+    // A list deleted on X takes its color with it.
+    const listColors = stored.listColors
+        ? Object.fromEntries(Object.entries(stored.listColors as ListColors).filter(([id]) => id in listMeta))
+        : undefined;
     await chrome.storage.local.set({
+        ...(listColors ? { listColors } : {}),
         listCache,
         listMeta,
         listCounts,

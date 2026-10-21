@@ -5,12 +5,14 @@ import {
     getMissingOperations,
     getStoredQueryIds,
     type ListCache,
+    type ListColors,
     type HookStatus,
     type ListMeta,
     type QueryIds,
     type SyncMode,
     type SyncState,
 } from './shared';
+import { LIST_COLORS, listColor } from './palette';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -112,6 +114,7 @@ let listFilter = '';
 let expandedListId: string | null = null;
 let currentCache: ListCache = {};
 let currentMeta: ListMeta = {};
+let currentColors: ListColors = {};
 const MAX_VISIBLE_MEMBERS = 50;
 
 function membersForList(cache: ListCache, listId: string): string[] {
@@ -137,6 +140,29 @@ function createChevron(expanded: boolean) {
     return icon;
 }
 
+// Cycles no color -> each palette color -> no color.
+function createSwatch(id: string, name: string) {
+    const color = listColor(currentColors[id]);
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'ml-1 h-4 w-4 shrink-0 rounded-full border transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 '
+        + (color ? 'border-transparent' : 'border-dashed border-slate-600 hover:border-slate-400');
+    if (color) swatch.style.backgroundColor = color.hex;
+    swatch.setAttribute('aria-label', `Color for ${name}: ${color ? color.name : 'none'}`);
+    swatch.title = 'Change color';
+    swatch.addEventListener('click', () => {
+        const current = currentColors[id];
+        const next = typeof current !== 'number' ? 0 : current + 1 < LIST_COLORS.length ? current + 1 : undefined;
+        const nextColors = { ...currentColors };
+        if (next === undefined) delete nextColors[id];
+        else nextColors[id] = next;
+        currentColors = nextColors;
+        renderLists(currentCache, currentMeta);
+        void chrome.storage.local.set({ listColors: nextColors });
+    });
+    return swatch;
+}
+
 function renderLists(cache: ListCache, meta: ListMeta) {
     const entries = Object.entries(meta)
         .map(([id, name]) => ({ id, name, count: membersForList(cache, id).length }))
@@ -159,6 +185,8 @@ function renderLists(cache: ListCache, meta: ListMeta) {
 
         const row = document.createElement('div');
         row.className = 'flex items-center gap-1';
+
+        row.appendChild(createSwatch(id, name));
 
         const toggle = document.createElement('button');
         toggle.type = 'button';
@@ -388,11 +416,12 @@ function render(
 
 async function refresh() {
     const [stored, queryIds, hostAccess] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker', 'listColors']),
         getStoredQueryIds(),
         hasHostAccess(),
     ]);
     unlistedToggle.checked = stored.showUnlistedMarker === true;
+    currentColors = (stored.listColors || {}) as ListColors;
     render(
         stored.syncState as SyncState | undefined,
         (stored.listCache || {}) as ListCache,
@@ -492,6 +521,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         || key === 'listMeta'
         || key === 'lastSync'
         || key === 'lastFullSync'
+        || key === 'listColors'
         || key === 'needsFullSync'
         || key === 'hookStatus'
         || key.startsWith('queryId:'),

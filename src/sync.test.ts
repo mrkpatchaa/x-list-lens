@@ -140,4 +140,14 @@ describe('runSync', () => {
         expect(memberListIds(urls).sort()).toEqual(['3001', '3002', '3003', '3004'])
         expect(storage.syncState).toMatchObject({ status: 'done', mode: 'full' })
     })
+
+    it('drops the color of a list deleted on X', async () => {
+        await afterFullSync()
+        storage.listColors = { '3004': 2, '3001': 0 }
+        const payload = capture()
+        ownedItems(payload).splice(3, 1) // 3004 deleted
+        await runSync('fast', deps(fakeX(payload).fetchJson))
+
+        expect(storage.listColors).toEqual({ '3001': 0 })
+    })
 })

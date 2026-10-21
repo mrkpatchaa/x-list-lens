@@ -10,6 +10,7 @@ import {
     getSelfHandle,
 } from './dom-badge';
 import { applyListMutationToStorage } from './cache-delta';
+import { listColor } from './palette';
 import {
     HOOKS_ATTR,
     getLocal,
@@ -18,11 +19,13 @@ import {
     isQueryHarvestedMessage,
     storeQueryId,
     type ListCache,
+    type ListColors,
     type ListMeta,
 } from './shared';
 
 let listCache: ListCache = {};
 let listMeta: ListMeta = {};
+let listColors: ListColors = {};
 // The optional "not in any of your lists" marker.
 let showUnlisted = false;
 let synced = false;
@@ -34,6 +37,8 @@ const HANDLE_ATTR = 'data-listlens-handle';
 const BADGE_CLASS = 'listlens-badge';
 const TIP_CLASS = 'listlens-tip';
 const NAMES_ATTR = 'data-listlens-names';
+const IDS_ATTR = 'data-listlens-ids';
+const MAX_DOTS = 3;
 const UNLISTED_CLASS = 'listlens-unlisted';
 const UNLISTED_TEXT = 'Not in any of your lists';
 const MAX_ROOTS_PER_FRAME = 40;
@@ -64,9 +69,10 @@ function readMarkerSettings(values: Record<string, unknown>) {
     if ('selfHandle' in values) storedSelfHandle = typeof values.selfHandle === 'string' ? values.selfHandle : undefined;
 }
 
-getLocal(['listCache', 'listMeta', 'showUnlistedMarker', 'lastSync', 'selfHandle']).then((result) => {
+getLocal(['listCache', 'listMeta', 'listColors', 'showUnlistedMarker', 'lastSync', 'selfHandle']).then((result) => {
     const nextCache: ListCache = result.listCache || {};
     listMeta = result.listMeta || {};
+    listColors = result.listColors || {};
     readMarkerSettings(result);
     if (showUnlisted) repaint(null);
     applyCache(nextCache);
@@ -83,6 +89,10 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         const wasShowing = showUnlisted && synced;
         readMarkerSettings(markerChanges);
         if (wasShowing || (showUnlisted && synced)) repaint(null);
+    }
+    if (changes.listColors) {
+        listColors = (changes.listColors.newValue as ListColors) || {};
+        if (!changes.listCache) repaint(null);
     }
     if (!changes.listCache && !changes.listMeta) return;
 
@@ -157,6 +167,26 @@ function createBadgeIcon() {
     return icon;
 }
 
+function sortByName(listIds: string[]) {
+    return [...listIds].sort((a, b) => (listMeta[a] || a).localeCompare(listMeta[b] || b));
+}
+
+function colorDot(hex: string) {
+    const dot = document.createElement('span');
+    dot.className = 'listlens-dot';
+    dot.style.backgroundColor = hex;
+    dot.setAttribute('aria-hidden', 'true');
+    return dot;
+}
+
+// One dot per colored list. Lists without a color add no dot.
+function colorDots(listIds: string[]) {
+    return listIds.flatMap((id) => {
+        const color = listColor(listColors[id]);
+        return color ? [colorDot(color.hex)] : [];
+    });
+}
+
 // Idempotent: safe to call again when a handle's lists change.
 function paint(node: HTMLElement): boolean {
     const found = findHandleForNode(node);
@@ -191,13 +221,15 @@ function paint(node: HTMLElement): boolean {
         badge.setAttribute('aria-label', UNLISTED_TEXT);
         badge.append(createBadgeIcon());
     } else {
-        const names = formatListNames(listIds, listMeta);
+        const ordered = sortByName(listIds);
+        const names = formatListNames(ordered, listMeta);
         badge.setAttribute(NAMES_ATTR, names);
+        badge.setAttribute(IDS_ATTR, ordered.join(','));
         badge.setAttribute('aria-label', `In ${listIds.length} ${listIds.length === 1 ? 'list' : 'lists'}: ${names}`);
         const count = document.createElement('span');
         count.className = 'listlens-badge-count';
         count.textContent = String(listIds.length);
-        badge.append(createBadgeIcon(), count);
+        badge.append(createBadgeIcon(), ...colorDots(ordered).slice(0, MAX_DOTS), count);
     }
 
     if (!layoutHosts.has(parent)) {
@@ -256,7 +288,19 @@ function showTip(badge: HTMLElement) {
     tip.id = TIP_ID;
     tip.className = TIP_CLASS;
     tip.setAttribute('role', 'tooltip');
-    tip.textContent = names;
+    const ids = badge.getAttribute(IDS_ATTR)?.split(',').filter(Boolean) || [];
+    if (ids.length === 0) {
+        tip.textContent = names;
+    } else {
+        for (const id of ids) {
+            const line = document.createElement('div');
+            line.className = 'listlens-tip-line';
+            const color = listColor(listColors[id]);
+            if (color) line.appendChild(colorDot(color.hex));
+            line.append(listMeta[id] || id);
+            tip.appendChild(line);
+        }
+    }
     document.body.appendChild(tip);
 
     const anchor = badge.getBoundingClientRect();
