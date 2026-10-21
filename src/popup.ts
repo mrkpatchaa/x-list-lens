@@ -13,6 +13,7 @@ import {
     type SyncState,
 } from './shared';
 import { LIST_COLORS, listColor } from './palette';
+import { buildExportFile, downloadBlob, needsExportTab, type ExportFormat } from './export-download';
 
 const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -39,6 +40,8 @@ const listsSearch = el<HTMLInputElement>('listsSearch');
 const listsList = el<HTMLDivElement>('listsList');
 const listsEmpty = el<HTMLParagraphElement>('listsEmpty');
 const unlistedToggle = el<HTMLInputElement>('unlistedToggle');
+const exportCsvBtn = el<HTMLButtonElement>('exportCsvBtn');
+const exportJsonBtn = el<HTMLButtonElement>('exportJsonBtn');
 const lastSyncEl = el<HTMLParagraphElement>('lastSync');
 const progressWrap = el<HTMLDivElement>('progressWrap');
 const progressBar = el<HTMLDivElement>('progressBar');
@@ -348,6 +351,8 @@ function render(
     reconnectBtn.disabled = running;
 
     syncBtn.disabled = running || !ready;
+    exportCsvBtn.disabled = !lastSync;
+    exportJsonBtn.disabled = !lastSync;
     fullSyncBtn.disabled = running || !ready;
     syncBtn.setAttribute('aria-busy', String(running));
     cancelBtn.disabled = state?.status === 'running' && state.cancelRequested === true;
@@ -478,6 +483,21 @@ function startSync(mode: SyncMode) {
 
 syncBtn.addEventListener('click', () => startSync(hasFullSync ? 'fast' : 'full'));
 fullSyncBtn.addEventListener('click', () => startSync('full'));
+function exportLists(format: ExportFormat) {
+    if (needsExportTab()) {
+        void chrome.tabs.create({ url: chrome.runtime.getURL(`export.html?format=${format}`) });
+        return;
+    }
+    void buildExportFile(format)
+        .then(({ name, blob }) => { downloadBlob(name, blob); })
+        .catch(() => {
+            errorMsg.textContent = 'ListLens could not build the export. Try again.';
+            show(errorMsg, true);
+        });
+}
+
+exportCsvBtn.addEventListener('click', () => exportLists('csv'));
+exportJsonBtn.addEventListener('click', () => exportLists('json'));
 unlistedToggle.addEventListener('change', () => {
     void chrome.storage.local.set({ showUnlistedMarker: unlistedToggle.checked });
 });

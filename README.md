@@ -33,6 +33,8 @@ Five pieces run in separate extension contexts:
 - **Durable recovery** — changed-list work is persisted, and an interrupted service-worker sync is reported as interrupted instead of leaving the popup stuck on “Running.” The previous cache remains available.
 - **Safe cancellation** — cancellation is persisted while a sync is running. Stopping leaves the previous cache intact.
 
+**Export** — the popup's **CSV** and **JSON** buttons download your synced lists and their members. CSV has one row per membership (`list_id, list_name, handle, owned`). Export reads only the local cache and never calls X. In Safari the file downloads from a small ListLens tab, because Safari closes the popup before a download starts.
+
 There is no scheduled background sync. The extension only talks to X when you ask it to, or right after you change a list yourself.
 
 ### Where your data lives

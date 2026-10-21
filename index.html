@@ -86,6 +86,11 @@
         <input id="unlistedToggle" type="checkbox" class="h-3.5 w-3.5 accent-blue-500">
         <span>Mark people not in any list</span>
       </label>
+      <div class="mt-3 flex items-center gap-2 border-t border-slate-800 pt-3 text-xs text-slate-400">
+        <span class="flex-1">Export</span>
+        <button id="exportCsvBtn" type="button" class="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 disabled:cursor-not-allowed disabled:opacity-40">CSV</button>
+        <button id="exportJsonBtn" type="button" class="rounded-md border border-slate-700 px-2 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:bg-slate-800 hover:text-slate-100 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 disabled:cursor-not-allowed disabled:opacity-40">JSON</button>
+      </div>
     </section>
 
     <section id="progressWrap" class="hidden flex-col gap-2" aria-label="Sync progress">

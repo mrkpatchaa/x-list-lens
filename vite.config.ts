@@ -8,4 +8,10 @@ export default defineConfig({
         tailwindcss(),
         crx({ manifest })
     ],
+    build: {
+        rollupOptions: {
+            // Not referenced by the manifest: the popup opens it in a tab.
+            input: { export: 'export.html' },
+        },
+    },
 })
