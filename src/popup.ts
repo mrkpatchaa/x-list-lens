@@ -8,6 +8,7 @@ import {
     type HookStatus,
     type ListMeta,
     type QueryIds,
+    type SyncMode,
     type SyncState,
 } from './shared';
 
@@ -19,6 +20,7 @@ const cancelBtn = el<HTMLButtonElement>('cancelBtn');
 const openListsBtn = el<HTMLButtonElement>('openListsBtn');
 const openListsLabel = el<HTMLSpanElement>('openListsLabel');
 const reconnectBtn = el<HTMLButtonElement>('reconnectBtn');
+const fullSyncBtn = el<HTMLButtonElement>('fullSyncBtn');
 const setupNotice = el<HTMLDivElement>('setupNotice');
 const setupEyebrow = el<HTMLParagraphElement>('setupEyebrow');
 const setupTitle = el<HTMLHeadingElement>('setupTitle');
@@ -291,7 +293,9 @@ function render(
     lastSync?: number,
     needsFullSync = false,
     env: Environment = { hostAccess: true },
+    lastFullSync?: number,
 ) {
+    hasFullSync = lastFullSync !== undefined;
     const people = Object.keys(cache).length;
     const lists = Object.keys(meta).length;
     const running = state?.status === 'running';
@@ -315,6 +319,7 @@ function render(
     reconnectBtn.disabled = running;
 
     syncBtn.disabled = running || !ready;
+    fullSyncBtn.disabled = running || !ready;
     syncBtn.setAttribute('aria-busy', String(running));
     cancelBtn.disabled = state?.status === 'running' && state.cancelRequested === true;
 
@@ -325,7 +330,7 @@ function render(
         progressBar.setAttribute('aria-valuenow', String(percent));
         progressLabel.textContent = total
             ? `${completed} of ${total} lists${list ? ` — ${list}` : ''}`
-            : 'Reading your Lists…';
+            : 'Checking your lists…';
         syncLabel.textContent = 'Syncing…';
         setStatus(cancelRequested ? 'Stopping' : 'Syncing', 'running');
         show(errorMsg, false);
@@ -353,7 +358,10 @@ function render(
         show(errorMsg, false);
     }
 
-    const stale = lastSync !== undefined && Date.now() - lastSync > STALE_AFTER_MS;
+    // A fast sync cannot catch a swap (one person leaves, one joins), so the
+    // nudge counts from the last full sync.
+    const lastFull = lastFullSync ?? lastSync;
+    const stale = lastFull !== undefined && Date.now() - lastFull > STALE_AFTER_MS;
     if (needsFullSync) {
         hintMsg.textContent = 'A list change could not be matched to a cached profile. Run a full sync when convenient.';
         show(hintMsg, true);
@@ -367,7 +375,10 @@ function render(
         hintMsg.textContent = 'This browser hides X’s requests from ListLens, so list changes you make on X are not picked up. Re-sync after you change a list.';
         show(hintMsg, true);
     } else if (stale && !error) {
-        hintMsg.textContent = 'Your cache is over a week old — re-sync to pick up changes made elsewhere.';
+        hintMsg.textContent = 'Your last full sync is over a week old — run a full sync to catch changes made elsewhere.';
+        show(hintMsg, true);
+    } else if (done?.mode === 'fast' && done.changedCount !== undefined) {
+        hintMsg.textContent = `${numberFormat.format(done.changedCount)} of ${plural(done.listCount ?? 0, 'list')} changed.`;
         show(hintMsg, true);
     } else {
         show(hintMsg, false);
@@ -376,7 +387,7 @@ function render(
 
 async function refresh() {
     const [stored, queryIds, hostAccess] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'needsFullSync', 'hookStatus']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus']),
         getStoredQueryIds(),
         hasHostAccess(),
     ]);
@@ -388,6 +399,7 @@ async function refresh() {
         typeof stored.lastSync === 'number' ? stored.lastSync : undefined,
         stored.needsFullSync === true,
         { hostAccess, hookStatus: stored.hookStatus as HookStatus | undefined },
+        typeof stored.lastFullSync === 'number' ? stored.lastFullSync : undefined,
     );
 }
 
@@ -413,19 +425,28 @@ async function detectInterruptedSync() {
     await chrome.storage.local.set({ syncState: interrupted });
 }
 
-function sendMessage(message: { type: string }): Promise<unknown> {
+function sendMessage(message: { type: string; mode?: SyncMode }): Promise<unknown> {
     return chrome.runtime.sendMessage(message);
 }
 
-syncBtn.addEventListener('click', () => {
-    console.info('[ListLens:Popup] Sync requested.');
+// The main button runs a fast sync once a full sync exists. The footer button
+// always runs a full one.
+let hasFullSync = false;
+
+function startSync(mode: SyncMode) {
+    console.info(`[ListLens:Popup] ${mode} sync requested.`);
     syncBtn.disabled = true;
-    void sendMessage({ type: MSG.START_SYNC }).catch(() => {
+    fullSyncBtn.disabled = true;
+    void sendMessage({ type: MSG.START_SYNC, mode }).catch(() => {
         syncBtn.disabled = false;
+        fullSyncBtn.disabled = false;
         errorMsg.textContent = 'ListLens could not start the sync. Try again.';
         show(errorMsg, true);
     });
-});
+}
+
+syncBtn.addEventListener('click', () => startSync(hasFullSync ? 'fast' : 'full'));
+fullSyncBtn.addEventListener('click', () => startSync('full'));
 
 cancelBtn.addEventListener('click', () => {
     console.info('[ListLens:Popup] Cancellation requested.');
@@ -465,6 +486,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
         || key === 'listCache'
         || key === 'listMeta'
         || key === 'lastSync'
+        || key === 'lastFullSync'
         || key === 'needsFullSync'
         || key === 'hookStatus'
         || key.startsWith('queryId:'),

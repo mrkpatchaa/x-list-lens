@@ -118,7 +118,10 @@
         </svg>
         Stored only on this device
       </span>
-      <button id="reconnectBtn" type="button" class="shrink-0 text-[11px] font-medium text-slate-400 underline-offset-2 transition-colors hover:text-slate-200 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-50">Reconnect</button>
+      <div class="flex shrink-0 items-center gap-3">
+        <button id="fullSyncBtn" type="button" title="Re-read every list. Catches changes a fast sync can miss." class="shrink-0 text-[11px] font-medium text-slate-400 underline-offset-2 transition-colors hover:text-slate-200 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-50">Full sync</button>
+        <button id="reconnectBtn" type="button" class="shrink-0 text-[11px] font-medium text-slate-400 underline-offset-2 transition-colors hover:text-slate-200 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-300 disabled:cursor-not-allowed disabled:opacity-50">Reconnect</button>
+      </div>
     </footer>
   </main>
   <script type="module" src="/src/popup.ts"></script>

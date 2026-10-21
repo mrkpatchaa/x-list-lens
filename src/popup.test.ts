@@ -135,4 +135,31 @@ describe('popup states', () => {
         expect(document.getElementById('setupNotice')?.classList.contains('hidden')).toBe(true);
         expect(document.getElementById('statusBadge')?.textContent).toBe('Ready');
     });
+
+    it('sends a fast sync from the main button once a full sync exists', async () => {
+        vi.resetModules();
+        const chromeMock = installChromeMock({
+            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListMembers': 'members-query',
+        }, { lastSync: Date.now(), lastFullSync: Date.now() });
+        await import('./popup');
+        await vi.waitFor(() => expect(document.getElementById('syncBtn')?.hasAttribute('disabled')).toBe(false));
+
+        (document.getElementById('syncBtn') as HTMLButtonElement).click();
+        await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: MSG.START_SYNC, mode: 'fast' }));
+    });
+
+    it('sends a full sync from the footer button', async () => {
+        vi.resetModules();
+        const chromeMock = installChromeMock({
+            'queryId:ListsManagementPageTimeline': 'lists-query',
+            'queryId:ListMembers': 'members-query',
+        }, { lastSync: Date.now(), lastFullSync: Date.now() });
+        await import('./popup');
+        const fullSync = document.getElementById('fullSyncBtn') as HTMLButtonElement;
+        await vi.waitFor(() => expect(fullSync.disabled).toBe(false));
+
+        fullSync.click();
+        await vi.waitFor(() => expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith({ type: MSG.START_SYNC, mode: 'full' }));
+    });
 });
