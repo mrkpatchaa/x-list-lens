@@ -188,12 +188,13 @@ function nextFollowedLists(read: ListsRead, stored: FollowedLists): FollowedList
 export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'done' | 'cancelled'> {
     await setSyncState({ status: 'running', done: 0, total: 0 });
 
-    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles', 'listColors', 'followedLists']);
+    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles', 'followedLists']);
     // A fast sync builds on a complete full sync. Without one, read everything.
     const mode: SyncMode = requested === 'fast'
         && typeof stored.lastFullSync === 'number'
         && stored.listCounts
         && stored.cacheVersion === CACHE_VERSION
+        && stored.listCache && typeof stored.listCache === 'object'
         ? 'fast'
         : 'full';
 
@@ -240,10 +241,17 @@ export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'don
     const listCache = buildNextCache(previousCache, keepIds, fresh);
     const now = Date.now();
     const selfHandle = read.owned.find((list) => list.ownerHandle)?.ownerHandle;
+    // Re-read the user's choices now: the popup stays usable during a sync,
+    // and a color or Include set meanwhile must not be undone.
+    const latest = await getLocal(['listColors', 'followedLists']);
     // A list deleted on X takes its color with it.
-    const listColors = stored.listColors
-        ? Object.fromEntries(Object.entries(stored.listColors as ListColors).filter(([id]) => id in listMeta))
+    const listColors = latest.listColors
+        ? Object.fromEntries(Object.entries(latest.listColors as ListColors).filter(([id]) => id in listMeta))
         : undefined;
+    const latestFollowed = (latest.followedLists || {}) as FollowedLists;
+    for (const [id, list] of Object.entries(followedLists)) {
+        if (id in latestFollowed) followedLists[id] = { ...list, included: latestFollowed[id].included === true };
+    }
     await chrome.storage.local.set({
         ...(listColors ? { listColors } : {}),
         followedLists,

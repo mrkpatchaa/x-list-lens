@@ -165,4 +165,32 @@ describe('runSync', () => {
         expect(storage.listMeta).toHaveProperty('5001', 'Followed demo')
         expect(storage.followedLists).toEqual({ '5001': { name: 'Followed demo', included: true, memberCount: 7 } })
     })
+
+    it('keeps a color or Include choice made while the sync runs', async () => {
+        await afterFullSync()
+        const { fetchJson } = fakeX()
+        let changed = false
+        const changeMidSync = vi.fn(async (url: string) => {
+            if (url.includes('/ListMembers') && !changed) {
+                changed = true
+                storage.listColors = { '3001': 4 }
+                storage.followedLists = { '5001': { name: 'Followed demo', included: true, memberCount: 7 } }
+            }
+            return fetchJson(url)
+        })
+        await runSync('full', deps(changeMidSync))
+
+        expect(storage.listColors).toEqual({ '3001': 4 })
+        expect(storage.followedLists).toEqual({ '5001': { name: 'Followed demo', included: true, memberCount: 7 } })
+    })
+
+    it('fast sync runs as a full sync when the cache was wiped', async () => {
+        await afterFullSync()
+        delete storage.listCache
+        const { urls, fetchJson } = fakeX()
+        await runSync('fast', deps(fetchJson))
+
+        expect(memberListIds(urls).sort()).toEqual(['3001', '3002', '3003', '3004'])
+        expect(storage.listCache).toHaveProperty('shared')
+    })
 })

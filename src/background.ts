@@ -179,7 +179,8 @@ async function requestSyncCancellation(): Promise<void> {
 chrome.runtime.onInstalled.addListener(async () => {
     const { cacheVersion } = await getLocal(['cacheVersion']);
     if (cacheVersion !== CACHE_VERSION) {
-        await chrome.storage.local.remove(['listCache', 'userHandles', 'needsFullSync', 'lastSync']);
+        // lastFullSync and listCounts go too: a fast sync must not build on a wiped cache.
+        await chrome.storage.local.remove(['listCache', 'userHandles', 'needsFullSync', 'lastSync', 'lastFullSync', 'listCounts']);
         await chrome.storage.local.set({ cacheVersion: CACHE_VERSION });
     }
 });
