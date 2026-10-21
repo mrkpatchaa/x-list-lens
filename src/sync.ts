@@ -84,7 +84,7 @@ async function fetchListMembers(
     listId: string,
     deps: SyncDeps,
     onMember: (member: MemberIdentity) => void,
-): Promise<Set<string>> {
+): Promise<{ members: Set<string>; truncated: boolean }> {
     const { signal, isCancelled: cancelled } = deps;
     const members = new Set<string>();
     const seenCursors = new Set<string>();
@@ -96,7 +96,7 @@ async function fetchListMembers(
     while (true) {
         if (pageCount >= MAX_MEMBER_PAGES) {
             console.warn(`[ListLens:Background] Stopped list ${listId} after ${MAX_MEMBER_PAGES} member pages.`);
-            break;
+            return { members, truncated: true };
         }
         const variables = JSON.stringify({ listId, count: PAGE_SIZE, cursor: cursor || undefined });
         const url = `https://x.com/i/api/graphql/${deps.queryIds.members}/ListMembers?variables=${encodeURIComponent(variables)}`;
@@ -130,7 +130,7 @@ async function fetchListMembers(
         await deps.delay(Math.floor(Math.random() * 700) + 800, signal);
     }
 
-    return members;
+    return { members, truncated: false };
 }
 
 async function fetchOwnedLists(
@@ -229,7 +229,9 @@ export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'don
         if (deps.isCancelled()) return 'cancelled';
         await setSyncState({ status: 'running', done, total: listsToRead.length, list: list.name });
 
-        const members = await fetchListMembers(list.id, deps, (member) => { nextUserHandles[member.userId] = member.handle; });
+        const { members, truncated } = await fetchListMembers(list.id, deps, (member) => { nextUserHandles[member.userId] = member.handle; });
+        // A list cut short has no trustworthy count: leave it out, so the next fast sync reads it again.
+        if (truncated) delete listCounts[list.id];
         if (deps.isCancelled()) return 'cancelled';
         fresh.set(list.id, members);
         done++;

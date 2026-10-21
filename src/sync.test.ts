@@ -193,4 +193,40 @@ describe('runSync', () => {
         expect(memberListIds(urls).sort()).toEqual(['3001', '3002', '3003', '3004'])
         expect(storage.listCache).toHaveProperty('shared')
     })
+
+    it('re-reads a list that was cut short at the page limit', async () => {
+        const { fetchJson } = fakeX()
+        let page = 0
+        // List 3001 never ends: every page has a new member and a next cursor.
+        const endless = vi.fn(async (url: string) => {
+            if (!url.includes('/ListMembers') || !url.includes('%223001%22')) return fetchJson(url)
+            page++
+            return { data: { list: { members_timeline: { timeline: { instructions: [{ type: 'TimelineAddEntries', entries: [
+                { entryId: `user-${page}`, content: { itemContent: { user_results: { result: { rest_id: `5${page}`, core: { screen_name: `p${page}` } } } } } },
+                { entryId: `cursor-bottom-${page}`, content: { value: `c${page}` } },
+            ] }] } } } } }
+        })
+        await runSync('full', deps(endless))
+        expect(storage.listCounts).not.toHaveProperty('3001')
+
+        const { urls, fetchJson: next } = fakeX()
+        await runSync('fast', deps(next))
+        expect(memberListIds(urls)).toEqual(['3001'])
+    })
+
+    it('leaves the previous cache untouched when the sync is cancelled', async () => {
+        await afterFullSync()
+        const before = structuredClone({ listCache: storage.listCache, listCounts: storage.listCounts, lastSync: storage.lastSync })
+        const payload = capture()
+        ownedItems(payload)[1].item.itemContent.list.member_count = 99
+        let cancelled = false
+        const { fetchJson } = fakeX(payload)
+        const cancelMidRead = vi.fn(async (url: string) => {
+            if (url.includes('/ListMembers')) cancelled = true
+            return fetchJson(url)
+        })
+        await expect(runSync('fast', { ...deps(cancelMidRead), isCancelled: () => cancelled })).resolves.toBe('cancelled')
+
+        expect({ listCache: storage.listCache, listCounts: storage.listCounts, lastSync: storage.lastSync }).toEqual(before)
+    })
 })
