@@ -15,6 +15,7 @@ import {
 } from './list-ownership';
 import { collectListPages } from './list-pages';
 import { createAbortError } from './abortable';
+import { buildNextCache, listsToReread } from './sync-plan';
 
 // listCache stores list IDs, not names (v1 stored names). Bump to discard old shapes.
 export const CACHE_VERSION = 2;
@@ -165,8 +166,17 @@ async function readOwnedLists(deps: SyncDeps): Promise<OwnedListSummary[]> {
 
 // Returns 'cancelled' when the user stopped the sync. The previous cache is
 // then left untouched rather than replaced by a partial one.
-export async function runSync(mode: SyncMode, deps: SyncDeps): Promise<'done' | 'cancelled'> {
+export async function runSync(requested: SyncMode, deps: SyncDeps): Promise<'done' | 'cancelled'> {
     await setSyncState({ status: 'running', done: 0, total: 0 });
+
+    const stored = await getLocal(['listCache', 'listMeta', 'listCounts', 'lastFullSync', 'cacheVersion', 'userHandles']);
+    // A fast sync builds on a complete full sync. Without one, read everything.
+    const mode: SyncMode = requested === 'fast'
+        && typeof stored.lastFullSync === 'number'
+        && stored.listCounts
+        && stored.cacheVersion === CACHE_VERSION
+        ? 'fast'
+        : 'full';
 
     const lists = await readOwnedLists(deps);
     const listMeta: ListMeta = {};
@@ -176,49 +186,54 @@ export async function runSync(mode: SyncMode, deps: SyncDeps): Promise<'done' | 
         if (list.memberCount !== undefined) listCounts[list.id] = list.memberCount;
     }
 
-    const localCache: ListCache = {};
-    console.info(`[ListLens:Background] Reading members for ${lists.length} lists.`);
-    const { userHandles } = await getLocal(['userHandles']);
-    const nextUserHandles: UserHandleIndex = { ...(userHandles || {}) };
+    const previousIds = new Set(Object.keys((stored.listMeta || {}) as ListMeta));
+    const toRead = mode === 'full'
+        ? new Set(lists.map((list) => list.id))
+        : listsToReread(lists, (stored.listCounts || {}) as ListCounts, previousIds);
+    const keepIds = new Set(lists.map((list) => list.id).filter((id) => !toRead.has(id)));
+    const removedCount = [...previousIds].filter((id) => !(id in listMeta)).length;
+    const listsToRead = lists.filter((list) => toRead.has(list.id));
+
+    console.info(`[ListLens:Background] ${mode} sync: reading members for ${listsToRead.length} of ${lists.length} lists.`);
+    const nextUserHandles: UserHandleIndex = { ...(stored.userHandles || {}) };
+    const fresh = new Map<string, Set<string>>();
     let done = 0;
 
-    for (const list of lists) {
+    for (const list of listsToRead) {
         if (deps.isCancelled()) return 'cancelled';
-        console.info(`[ListLens:Background] Syncing list ${done + 1}/${lists.length}: ${list.name}`);
-        await setSyncState({ status: 'running', done, total: lists.length, list: list.name });
+        await setSyncState({ status: 'running', done, total: listsToRead.length, list: list.name });
 
         const members = await fetchListMembers(list.id, deps, (member) => { nextUserHandles[member.userId] = member.handle; });
         if (deps.isCancelled()) return 'cancelled';
-
-        for (const handle of members) {
-            if (!localCache[handle]) localCache[handle] = [];
-            localCache[handle].push(list.id);
-        }
+        fresh.set(list.id, members);
         done++;
         await deps.delay(INTER_LIST_DELAY_MS, deps.signal);
     }
     if (deps.isCancelled()) return 'cancelled';
 
+    const previousCache = mode === 'fast' ? (stored.listCache || {}) as ListCache : {};
+    const listCache = buildNextCache(previousCache, keepIds, fresh);
     const now = Date.now();
     const selfHandle = lists.find((list) => list.ownerHandle)?.ownerHandle;
     await chrome.storage.local.set({
-        listCache: localCache,
+        listCache,
         listMeta,
         listCounts,
         userHandles: nextUserHandles,
         needsFullSync: false,
         lastSync: now,
-        lastFullSync: now,
         cacheVersion: CACHE_VERSION,
+        ...(mode === 'full' ? { lastFullSync: now } : {}),
         ...(selfHandle ? { selfHandle } : {}),
     });
-    console.info(`[ListLens:Background] ${mode === 'full' ? 'Full' : 'Fast'} sync finished.`);
+    console.info(`[ListLens:Background] ${mode} sync finished.`);
     await setSyncState({
         status: 'done',
         mode,
         at: now,
         listCount: lists.length,
-        peopleCount: Object.keys(localCache).length,
+        peopleCount: Object.keys(listCache).length,
+        ...(mode === 'fast' ? { changedCount: toRead.size + removedCount } : {}),
     });
     return 'done';
 }

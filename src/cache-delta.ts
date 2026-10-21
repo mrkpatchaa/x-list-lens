@@ -1,4 +1,4 @@
-import { getLocal, type ListCache, type ListMutationMessage, type UserHandleIndex } from './shared'
+import { getLocal, type ListCache, type ListCounts, type ListMutationMessage, type UserHandleIndex } from './shared'
 
 export function applyMembershipDelta(
     cache: ListCache,
@@ -31,7 +31,7 @@ export async function applyListMutationToStorage(
     payload: ListMutationMessage['payload'],
     pageHandle?: string,
 ): Promise<ListCache | undefined> {
-    const { listCache, userHandles } = await getLocal(['listCache', 'userHandles'])
+    const { listCache, userHandles, listCounts } = await getLocal(['listCache', 'userHandles', 'listCounts'])
     const index = (userHandles || {}) as UserHandleIndex
     // X's reply rarely names the user, so fall back to the index, then to the page.
     const handle = payload.handle || index[payload.userId] || pageHandle
@@ -44,7 +44,12 @@ export async function applyListMutationToStorage(
 
     const nextCache = applyMembershipDelta((listCache || {}) as ListCache, payload.listId, handle, payload.action)
     const nextIndex = { ...index, [payload.userId]: handle.toLowerCase() }
-    await chrome.storage.local.set({ listCache: nextCache, userHandles: nextIndex })
+    // Keep X's count in step, so the next fast sync does not re-read this list for nothing.
+    const counts = (listCounts || {}) as ListCounts
+    const nextCounts = payload.listId in counts
+        ? { ...counts, [payload.listId]: Math.max(0, counts[payload.listId] + (payload.action === 'add' ? 1 : -1)) }
+        : counts
+    await chrome.storage.local.set({ listCache: nextCache, userHandles: nextIndex, ...(listCounts ? { listCounts: nextCounts } : {}) })
     console.info(`[ListLens:Content] Applied ${payload.action} for @${handle} without refetching the list.`)
     return nextCache
 }

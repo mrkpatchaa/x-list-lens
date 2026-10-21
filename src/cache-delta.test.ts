@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { applyMembershipDelta } from './cache-delta'
+import { describe, expect, it, vi } from 'vitest'
+import { applyListMutationToStorage, applyMembershipDelta } from './cache-delta'
 
 describe('applyMembershipDelta', () => {
     it('adds a newly seen account without rebuilding other memberships', () => {
@@ -31,5 +31,21 @@ describe('applyMembershipDelta', () => {
         const cache = { alice: ['1'] }
         applyMembershipDelta(cache, '1', 'alice', 'remove')
         expect(cache).toEqual({ alice: ['1'] })
+    })
+})
+
+describe('applyListMutationToStorage', () => {
+    it('keeps the stored count in step with a local add', async () => {
+        const storage: Record<string, unknown> = { listCache: {}, userHandles: { '7': 'bob' }, listCounts: { '1': 5 } }
+        vi.stubGlobal('chrome', { storage: { local: {
+            get: async (keys: string[]) => Object.fromEntries(keys.filter((k) => k in storage).map((k) => [k, storage[k]])),
+            set: async (values: Record<string, unknown>) => { Object.assign(storage, values) },
+        } } })
+
+        await applyListMutationToStorage({ listId: '1', userId: '7', action: 'add' })
+        expect(storage.listCounts).toEqual({ '1': 6 })
+
+        await applyListMutationToStorage({ listId: '9', userId: '7', action: 'add' })
+        expect(storage.listCounts).toEqual({ '1': 6 })
     })
 })

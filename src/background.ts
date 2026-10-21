@@ -186,7 +186,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
     if (message?.type === MSG.START_SYNC) {
-        syncLists();
+        void syncLists(message.mode === 'fast' ? 'fast' : 'full');
         sendResponse({ status: 'started' });
     }
 
