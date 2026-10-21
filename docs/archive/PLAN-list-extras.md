@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript, Chrome MV3 (also Opera and Safari), Vite + CRXJS, Tailwind v4 (popup), Vitest with jsdom.
 
-**Spec:** `docs/specs/SPEC-list-extras.md`
+**Spec:** `docs/archive/SPEC-list-extras.md`
 
 ## Global Constraints
 
