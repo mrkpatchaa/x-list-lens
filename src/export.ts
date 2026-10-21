@@ -21,7 +21,8 @@ export function collectExport(cache: ListCache, meta: ListMeta, followed: Follow
 // Quote fields that need it, and stop a spreadsheet from running a value as a
 // formula: followed list names are written by other people.
 function csvCell(value: string): string {
-    const safe = /^[=+\-@]/.test(value) ? `'${value}` : value
+    // OWASP's list: = + - @ at the start, also behind spaces, and a leading tab or carriage return.
+    const safe = /^\s*[=+\-@]|^[\t\r]/.test(value) ? `'${value}` : value
     return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }
 

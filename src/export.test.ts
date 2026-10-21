@@ -39,6 +39,13 @@ describe('export', () => {
         ])
     })
 
+    it('guards formulas hidden behind a tab, a carriage return or spaces', () => {
+        const lists = collectExport({ alice: ['1', '2', '3'] }, { '1': '\t=1+1', '2': '\r=1+1', '3': '  =1+1' }, {})
+        const names = parseCsv(toCsv(lists)).slice(1).map((row) => row[1])
+
+        expect(names).toEqual(["'\t=1+1", "'\r=1+1", "'  =1+1"])
+    })
+
     it('names files by date', () => {
         expect(exportFileName('csv', new Date(2026, 9, 21))).toBe('listlens-2026-10-21.csv')
     })
