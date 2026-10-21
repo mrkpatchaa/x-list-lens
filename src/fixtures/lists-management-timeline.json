@@ -1,0 +1,399 @@
+{
+  "data": {
+    "viewer": {
+      "list_management_timeline": {
+        "timeline": {
+          "instructions": [
+            {
+              "type": "TimelineClearCache"
+            },
+            {
+              "direction": "Top",
+              "type": "TimelineTerminateTimeline"
+            },
+            {
+              "direction": "Bottom",
+              "type": "TimelineTerminateTimeline"
+            },
+            {
+              "entries": [
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineModule",
+                    "clientEventInfo": {
+                      "component": "suggest_list_to_follow",
+                      "details": {
+                        "timelinesDetails": {
+                          "injectionType": "ListToFollow"
+                        }
+                      }
+                    },
+                    "displayType": "Vertical",
+                    "entryType": "TimelineTimelineModule",
+                    "footer": {
+                      "displayType": "Classic",
+                      "text": "Show more"
+                    },
+                    "header": {
+                      "displayType": "Classic",
+                      "sticky": true,
+                      "text": "Discover new Lists"
+                    },
+                    "items": [
+                      {
+                        "entryId": "list-to-follow-module-2112850805584297984-list-4001",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_list_to_follow",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "ListToFollow"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithSubscribe",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": false,
+                              "id": "TGlzdDo0MDAx",
+                              "id_str": "4001",
+                              "is_member": false,
+                              "member_count": 35,
+                              "members_context": "35 members",
+                              "mode": "Public",
+                              "muting": false,
+                              "name": "Football",
+                              "pinning": false,
+                              "subscriber_count": 17,
+                              "followers_context": "17 followers",
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "Rec One",
+                                    "screen_name": "rec_owner_one"
+                                  },
+                                  "rest_id": "2001"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "entryId": "list-to-follow-module-2112850805584297984-list-4002",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_list_to_follow",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "ListToFollow"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithSubscribe",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": false,
+                              "id": "TGlzdDo0MDAy",
+                              "id_str": "4002",
+                              "is_member": false,
+                              "member_count": 24,
+                              "members_context": "24 members",
+                              "mode": "Public",
+                              "muting": false,
+                              "name": "Racing",
+                              "pinning": false,
+                              "subscriber_count": 167,
+                              "followers_context": "167 followers",
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "Rec Two",
+                                    "screen_name": "rec_owner_two"
+                                  },
+                                  "rest_id": "2002"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "entryId": "list-to-follow-module-2112850805584297984",
+                  "sortIndex": "2112850805584297984"
+                },
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineModule",
+                    "clientEventInfo": {
+                      "component": "suggest_owned_subscribed_list",
+                      "details": {
+                        "timelinesDetails": {
+                          "injectionType": "OwnedSubscribedList"
+                        }
+                      }
+                    },
+                    "displayType": "Vertical",
+                    "entryType": "TimelineTimelineModule",
+                    "header": {
+                      "displayType": "Classic",
+                      "sticky": false,
+                      "text": "Your Lists"
+                    },
+                    "items": [
+                      {
+                        "entryId": "owned-subscribed-list-module-0-list-3001",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithPin",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": true,
+                              "id": "TGlzdDozMDAx",
+                              "id_str": "3001",
+                              "is_member": false,
+                              "member_count": 14,
+                              "members_context": "14 members",
+                              "mode": "Private",
+                              "muting": false,
+                              "name": "Alpha",
+                              "pinning": true,
+                              "subscriber_count": 0,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "ListLens Owner",
+                                    "screen_name": "listlens_owner"
+                                  },
+                                  "rest_id": "1000"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "entryId": "owned-subscribed-list-module-0-list-3002",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithPin",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": true,
+                              "id": "TGlzdDozMDAy",
+                              "id_str": "3002",
+                              "is_member": false,
+                              "member_count": 15,
+                              "members_context": "15 members",
+                              "mode": "Private",
+                              "muting": false,
+                              "name": "Sport",
+                              "pinning": true,
+                              "subscriber_count": 0,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "ListLens Owner",
+                                    "screen_name": "listlens_owner"
+                                  },
+                                  "rest_id": "1000"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "entryId": "owned-subscribed-list-module-0-list-3003",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithPin",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": true,
+                              "id": "TGlzdDozMDAz",
+                              "id_str": "3003",
+                              "is_member": false,
+                              "member_count": 96,
+                              "members_context": "96 members",
+                              "mode": "Private",
+                              "muting": false,
+                              "name": "Team",
+                              "pinning": true,
+                              "subscriber_count": 0,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "ListLens Owner",
+                                    "screen_name": "listlens_owner"
+                                  },
+                                  "rest_id": "1000"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "entryId": "owned-subscribed-list-module-0-list-3004",
+                        "item": {
+                          "clientEventInfo": {
+                            "component": "suggest_owned_subscribed_list",
+                            "details": {
+                              "timelinesDetails": {
+                                "injectionType": "OwnedSubscribedList"
+                              }
+                            },
+                            "element": "list"
+                          },
+                          "itemContent": {
+                            "__typename": "TimelineTwitterList",
+                            "displayType": "ListWithPin",
+                            "itemType": "TimelineTwitterList",
+                            "list": {
+                              "created_at": 1600000000000,
+                              "description": "",
+                              "following": true,
+                              "id": "TGlzdDozMDA0",
+                              "id_str": "3004",
+                              "is_member": false,
+                              "member_count": 49,
+                              "members_context": "49 members",
+                              "mode": "Private",
+                              "muting": false,
+                              "name": "Tech",
+                              "pinning": true,
+                              "subscriber_count": 0,
+                              "user_results": {
+                                "result": {
+                                  "__typename": "User",
+                                  "core": {
+                                    "name": "ListLens Owner",
+                                    "screen_name": "listlens_owner"
+                                  },
+                                  "rest_id": "1000"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "entryId": "owned-subscribed-list-module-0",
+                  "sortIndex": "2112850805584297983"
+                },
+                {
+                  "content": {
+                    "__typename": "TimelineTimelineCursor",
+                    "cursorType": "Bottom",
+                    "entryType": "TimelineTimelineCursor",
+                    "value": "DAAHCgABHVJanQI___4LAAIAAAABMAgAAwAAAAIAAA"
+                  },
+                  "entryId": "cursor-bottom-2112850805584297982",
+                  "sortIndex": "2112850805584297982"
+                }
+              ],
+              "type": "TimelineAddEntries"
+            }
+          ],
+          "metadata": {
+            "scribeConfig": {
+              "page": "list_management"
+            }
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    {
+      "code": 214,
+      "extensions": {
+        "code": 214,
+        "kind": "Validation",
+        "name": "BadRequestError",
+        "source": "Client"
+      },
+      "kind": "Validation",
+      "locations": [
+        {
+          "column": 3,
+          "line": 1643
+        }
+      ],
+      "message": "BadRequest: com.twitter.strato.serialization.DecodeException",
+      "name": "BadRequestError",
+      "path": [
+        "viewer",
+        "list_management_timeline",
+        "timeline",
+        "instructions",
+        3,
+        "entries",
+        0,
+        "content",
+        "items",
+        0,
+        "item",
+        "itemContent",
+        "list",
+        "default_banner_media_results",
+        "result"
+      ],
+      "source": "Client"
+    }
+  ]
+}

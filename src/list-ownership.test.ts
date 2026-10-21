@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { buildListOwnershipsVariables, parseListManagementPage, parseOwnedListsPage } from './list-ownership'
 
@@ -95,7 +96,7 @@ describe('parseOwnedListsPage', () => {
                 },
             },
         ]), '42')).toEqual({
-            lists: [{ id: '1', name: 'Mine' }],
+            lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
             cursor: '',
         })
     })
@@ -106,7 +107,7 @@ describe('parseOwnedListsPage', () => {
             listRecord('2', 'Recommendation', '99'),
             listRecord('1', 'Mine'),
         ], 'NEXT_PAGE'), '42')).toEqual({
-            lists: [{ id: '1', name: 'Mine' }],
+            lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
             cursor: 'NEXT_PAGE',
         })
     })
@@ -163,7 +164,7 @@ describe('parseOwnedListsPage', () => {
                 content: { value: 'NEXT_PAGE' },
             },
         ]), '42')).toEqual({
-            lists: [{ id: '1', name: 'Mine' }],
+            lists: [{ id: '1', name: 'Mine', memberCount: 2 }],
             cursor: 'NEXT_PAGE',
         })
     })
@@ -196,5 +197,15 @@ describe('parseOwnedListsPage', () => {
     it('rejects GraphQL errors without usable data', () => {
         expect(() => parseOwnedListsPage({ errors: [{ message: 'Unknown query' }] }, '42'))
             .toThrow(/ListOwnerships/)
+    })
+})
+
+const capture = JSON.parse(readFileSync('src/fixtures/lists-management-timeline.json', 'utf8'))
+
+describe('real ListsManagementPageTimeline capture', () => {
+    it('reads owned lists and member counts from a real capture', () => {
+        const { lists } = parseListManagementPage(capture, '1000')
+        expect(lists.map((l) => [l.id, l.memberCount])).toEqual([['3001', 14], ['3002', 15], ['3003', 96], ['3004', 49]])
+        expect(lists.every((l) => l.ownerHandle === 'listlens_owner')).toBe(true)
     })
 })

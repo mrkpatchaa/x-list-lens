@@ -1,12 +1,13 @@
 import { XApiError } from './x-api'
 import { isOwnedListRecord } from './list-filter'
 
-export type OwnedListSummary = { id: string; name: string }
+export type OwnedListSummary = { id: string; name: string; memberCount?: number; ownerHandle?: string }
 
 type JsonRecord = Record<string, unknown>
 
 const MAX_TRAVERSAL_NODES = 50_000
 const LIST_ID_RE = /^\d{1,32}$/
+const HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/
 
 export function buildListOwnershipsVariables(
     userId: string,
@@ -41,7 +42,20 @@ function readListRecord(value: unknown): OwnedListSummary | undefined {
         || Object.prototype.hasOwnProperty.call(value, 'is_member')
     if (!hasListMetadata) return undefined
 
-    return { id, name }
+    const summary: OwnedListSummary = { id, name }
+    const count = value.member_count
+    if (typeof count === 'number' && Number.isInteger(count) && count >= 0) summary.memberCount = count
+    const ownerHandle = readOwnerHandle(value)
+    if (ownerHandle) summary.ownerHandle = ownerHandle
+    return summary
+}
+
+function readOwnerHandle(value: JsonRecord): string | undefined {
+    const owner = isRecord(value.user_results) && isRecord(value.user_results.result) ? value.user_results.result : undefined
+    if (!owner) return undefined
+    const handle = (isRecord(owner.core) ? readString(owner.core.screen_name) : undefined)
+        ?? (isRecord(owner.legacy) ? readString(owner.legacy.screen_name) : undefined)
+    return handle && HANDLE_RE.test(handle) ? handle.toLowerCase() : undefined
 }
 
 function isOwnershipKey(key: string): boolean {
