@@ -2,7 +2,7 @@
 
 A Chrome extension that shows, inline on X/Twitter, which of **your** Lists each account belongs to.
 
-Every account you come across gets a small list badge next to its handle. Hover, focus, or tap it to see the list names. Badges appear on timeline posts, profile headers, and user cells (followers, search results, and “who to follow”).
+Every account you come across gets a small list badge next to its handle. Hover, focus, or tap it to see the list names. You can also turn on a faint marker for accounts that are in none of your lists (**Mark people not in any list** in the popup). It never appears on your own account. Badges appear on timeline posts, profile headers, and user cells (followers, search results, and “who to follow”).
 
 ---
 

@@ -2,10 +2,12 @@ import './badge.css';
 import {
     BADGE_TARGET_SELECTOR,
     PROFILE_HEADER_SELECTOR,
+    badgeKind,
     findHandle,
     findHandleForUserId,
     formatListNames,
     getProfileHandleFromPath,
+    getSelfHandle,
 } from './dom-badge';
 import { applyListMutationToStorage } from './cache-delta';
 import {
@@ -21,6 +23,10 @@ import {
 
 let listCache: ListCache = {};
 let listMeta: ListMeta = {};
+// The optional "not in any of your lists" marker.
+let showUnlisted = false;
+let synced = false;
+let storedSelfHandle: string | undefined;
 
 // UserCell covers list-member pages, followers, search results and "who to follow".
 const TARGET_SELECTOR = BADGE_TARGET_SELECTOR;
@@ -28,6 +34,8 @@ const HANDLE_ATTR = 'data-listlens-handle';
 const BADGE_CLASS = 'listlens-badge';
 const TIP_CLASS = 'listlens-tip';
 const NAMES_ATTR = 'data-listlens-names';
+const UNLISTED_CLASS = 'listlens-unlisted';
+const UNLISTED_TEXT = 'Not in any of your lists';
 const MAX_ROOTS_PER_FRAME = 40;
 const MAX_PAINT_ATTEMPTS = 10;
 const TIP_ID = 'listlens-tip';
@@ -50,14 +58,32 @@ getLocal(['hookStatus']).then((stored) => {
     if (stored.hookStatus !== hookStatus) return chrome.storage.local.set({ hookStatus });
 }).catch(() => { /* extension reloaded */ });
 
-getLocal(['listCache', 'listMeta']).then((result) => {
+function readMarkerSettings(values: Record<string, unknown>) {
+    if ('showUnlistedMarker' in values) showUnlisted = values.showUnlistedMarker === true;
+    if ('lastSync' in values) synced = typeof values.lastSync === 'number';
+    if ('selfHandle' in values) storedSelfHandle = typeof values.selfHandle === 'string' ? values.selfHandle : undefined;
+}
+
+getLocal(['listCache', 'listMeta', 'showUnlistedMarker', 'lastSync', 'selfHandle']).then((result) => {
     const nextCache: ListCache = result.listCache || {};
     listMeta = result.listMeta || {};
+    readMarkerSettings(result);
+    if (showUnlisted) repaint(null);
     applyCache(nextCache);
 });
 
 chrome.storage.onChanged.addListener((changes, namespace) => {
     if (namespace !== 'local') return;
+    const markerChanges = Object.fromEntries(
+        ['showUnlistedMarker', 'lastSync', 'selfHandle']
+            .filter((key) => key in changes)
+            .map((key) => [key, changes[key].newValue]),
+    );
+    if (Object.keys(markerChanges).length > 0) {
+        const wasShowing = showUnlisted && synced;
+        readMarkerSettings(markerChanges);
+        if (wasShowing || (showUnlisted && synced)) repaint(null);
+    }
     if (!changes.listCache && !changes.listMeta) return;
 
     if (changes.listMeta) listMeta = (changes.listMeta.newValue as ListMeta) || {};
@@ -147,20 +173,32 @@ function paint(node: HTMLElement): boolean {
     node.setAttribute(HANDLE_ATTR, found.handle);
 
     const listIds = listCache[found.handle];
-    if (!listIds || listIds.length === 0) return true;
+    const kind = badgeKind(found.handle, listIds, {
+        selfHandle: getSelfHandle(document, storedSelfHandle),
+        showUnlisted,
+        synced,
+    });
+    if (kind === 'none') return true;
 
-    const names = formatListNames(listIds, listMeta);
     const badge = document.createElement('button');
     badge.type = 'button';
     badge.className = BADGE_CLASS;
-    badge.setAttribute(NAMES_ATTR, names);
-    badge.setAttribute('aria-label', `In ${listIds.length} ${listIds.length === 1 ? 'list' : 'lists'}: ${names}`);
     badge.setAttribute('aria-expanded', 'false');
 
-    const count = document.createElement('span');
-    count.className = 'listlens-badge-count';
-    count.textContent = String(listIds.length);
-    badge.append(createBadgeIcon(), count);
+    if (kind === 'unlisted') {
+        badge.classList.add(UNLISTED_CLASS);
+        badge.setAttribute(NAMES_ATTR, UNLISTED_TEXT);
+        badge.setAttribute('aria-label', UNLISTED_TEXT);
+        badge.append(createBadgeIcon());
+    } else {
+        const names = formatListNames(listIds, listMeta);
+        badge.setAttribute(NAMES_ATTR, names);
+        badge.setAttribute('aria-label', `In ${listIds.length} ${listIds.length === 1 ? 'list' : 'lists'}: ${names}`);
+        const count = document.createElement('span');
+        count.className = 'listlens-badge-count';
+        count.textContent = String(listIds.length);
+        badge.append(createBadgeIcon(), count);
+    }
 
     if (!layoutHosts.has(parent)) {
         layoutHosts.set(parent, { display: parent.style.display, alignItems: parent.style.alignItems });

@@ -30,6 +30,21 @@
   outline-offset: 2px;
 }
 
+.listlens-badge.listlens-unlisted {
+  min-width: 18px;
+  padding: 0 3px;
+  border-color: rgba(113, 118, 123, 0.45);
+  background: transparent;
+  color: rgb(113, 118, 123);
+  opacity: 0.75;
+}
+
+.listlens-badge.listlens-unlisted:hover {
+  border-color: rgba(113, 118, 123, 0.7);
+  background: rgba(113, 118, 123, 0.1);
+  opacity: 1;
+}
+
 .listlens-badge-icon {
   width: 11px;
   height: 11px;
@@ -70,5 +85,10 @@
     border-color: ButtonText;
     background: Canvas;
     color: ButtonText;
+  }
+
+  .listlens-badge.listlens-unlisted {
+    border-style: dashed;
+    opacity: 1;
   }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { BADGE_TARGET_SELECTOR, findHandle, findHandleForUserId, formatListNames, getProfileHandleFromPath } from './dom-badge'
+import { BADGE_TARGET_SELECTOR, badgeKind, findHandle, findHandleForUserId, formatListNames, getProfileHandleFromPath, getSelfHandle } from './dom-badge'
 
 describe('badge target selection', () => {
     it('includes the profile header used above the feed', () => {
@@ -60,5 +60,25 @@ describe('findHandleForUserId', () => {
 
         expect(findHandleForUserId(document, '1014175658199613440')).toBe('santoshyadavdev')
         expect(findHandleForUserId(document, '42')).toBeUndefined()
+    })
+})
+
+describe('badgeKind', () => {
+    it('marks unlisted people but never you, and never before a sync', () => {
+        const o = { selfHandle: 'mrk', showUnlisted: true, synced: true }
+        expect(badgeKind('alice', undefined, o)).toBe('unlisted')
+        expect(badgeKind('alice', [], o)).toBe('unlisted')
+        expect(badgeKind('alice', ['1'], o)).toBe('listed')
+        expect(badgeKind('mrk', undefined, o)).toBe('none')
+        expect(badgeKind('alice', undefined, { ...o, synced: false })).toBe('none')
+        expect(badgeKind('alice', undefined, { ...o, showUnlisted: false })).toBe('none')
+    })
+
+    it('reads your own handle from the profile link in any case', () => {
+        document.body.innerHTML = '<a data-testid="AppTabBar_Profile_Link" href="/MrK"></a>'
+        expect(getSelfHandle(document, 'stored')).toBe('mrk')
+        document.body.innerHTML = ''
+        expect(getSelfHandle(document, 'Stored_One')).toBe('stored_one')
+        expect(getSelfHandle(document)).toBeUndefined()
     })
 })

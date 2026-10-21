@@ -36,6 +36,7 @@ const listsCount = el<HTMLSpanElement>('listsCount');
 const listsSearch = el<HTMLInputElement>('listsSearch');
 const listsList = el<HTMLDivElement>('listsList');
 const listsEmpty = el<HTMLParagraphElement>('listsEmpty');
+const unlistedToggle = el<HTMLInputElement>('unlistedToggle');
 const lastSyncEl = el<HTMLParagraphElement>('lastSync');
 const progressWrap = el<HTMLDivElement>('progressWrap');
 const progressBar = el<HTMLDivElement>('progressBar');
@@ -387,10 +388,11 @@ function render(
 
 async function refresh() {
     const [stored, queryIds, hostAccess] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker']),
         getStoredQueryIds(),
         hasHostAccess(),
     ]);
+    unlistedToggle.checked = stored.showUnlistedMarker === true;
     render(
         stored.syncState as SyncState | undefined,
         (stored.listCache || {}) as ListCache,
@@ -447,6 +449,9 @@ function startSync(mode: SyncMode) {
 
 syncBtn.addEventListener('click', () => startSync(hasFullSync ? 'fast' : 'full'));
 fullSyncBtn.addEventListener('click', () => startSync('full'));
+unlistedToggle.addEventListener('change', () => {
+    void chrome.storage.local.set({ showUnlistedMarker: unlistedToggle.checked });
+});
 
 cancelBtn.addEventListener('click', () => {
     console.info('[ListLens:Popup] Cancellation requested.');

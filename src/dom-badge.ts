@@ -79,3 +79,23 @@ export function findHandleForUserId(root: ParentNode, userId: string): string | 
     }
     return undefined;
 }
+
+// Your own account never gets the "not in any list" marker. X's side nav links
+// to your profile; the handle saved at sync time covers pages without it.
+export function getSelfHandle(root: ParentNode, stored?: string): string | undefined {
+    const href = root.querySelector('a[data-testid="AppTabBar_Profile_Link"]')?.getAttribute('href') || null;
+    return profileHandleFromHref(href) ?? (stored && /^[A-Za-z0-9_]{1,15}$/.test(stored) ? stored.toLowerCase() : undefined);
+}
+
+export type BadgeKind = 'none' | 'listed' | 'unlisted';
+
+export function badgeKind(
+    handle: string,
+    lists: string[] | undefined,
+    opts: { selfHandle?: string; showUnlisted: boolean; synced: boolean },
+): BadgeKind {
+    if (lists && lists.length > 0) return 'listed';
+    // Before a first sync, "in no list" is not known yet.
+    if (!opts.showUnlisted || !opts.synced || handle === opts.selfHandle) return 'none';
+    return 'unlisted';
+}
