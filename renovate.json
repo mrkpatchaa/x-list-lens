@@ -5,6 +5,9 @@
     "schedule:earlyMondays"
   ],
   "minimumReleaseAge": "3 days",
+  "constraints": {
+    "npm": "^11"
+  },
   "internalChecksFilter": "strict",
   "prCreation": "not-pending",
   "prNotPendingHours": 96,
