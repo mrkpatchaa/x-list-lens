@@ -2,7 +2,7 @@
 
 A Chrome extension that shows, inline on X/Twitter, which of **your** Lists each account belongs to.
 
-Every account you come across gets a small list badge next to its handle. Hover, focus, or tap it to see the list names. You can also turn on a faint marker for accounts that are in none of your lists (**Mark people not in any list** in the popup). It never appears on your own account. To tell lists apart at a glance, click the dot next to a list in the popup to give it a color. The badge then shows a dot for each colored list, up to three. Badges appear on timeline posts, profile headers, and user cells (followers, search results, and “who to follow”).
+Every account you come across gets a small list badge next to its handle. Hover, focus, or tap it to see the list names. You can also turn on a faint marker for accounts that are in none of your lists (**Mark people not in any list** in the popup). It never appears on your own account. To tell lists apart at a glance, click the dot next to a list in the popup to give it a color. The badge then shows a dot for each colored list, up to three. Each time you open the popup, the **Revisit** card picks a random person from your own lists. Click the handle to open their profile, or **Another** to pick someone else. Badges appear on timeline posts, profile headers, and user cells (followers, search results, and “who to follow”).
 
 ---
 

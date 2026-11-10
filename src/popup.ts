@@ -49,6 +49,11 @@ const lastSyncEl = el<HTMLParagraphElement>('lastSync');
 const progressWrap = el<HTMLDivElement>('progressWrap');
 const progressBar = el<HTMLDivElement>('progressBar');
 const progressLabel = el<HTMLParagraphElement>('progressLabel');
+const revisitCard = el<HTMLElement>('revisitCard');
+const revisitShuffleBtn = el<HTMLButtonElement>('revisitShuffleBtn');
+const revisitOpenBtn = el<HTMLButtonElement>('revisitOpenBtn');
+const revisitHandle = el<HTMLSpanElement>('revisitHandle');
+const revisitLists = el<HTMLSpanElement>('revisitLists');
 const hintMsg = el<HTMLParagraphElement>('hintMsg');
 const errorMsg = el<HTMLParagraphElement>('errorMsg');
 
@@ -307,6 +312,46 @@ function renderLists(cache: ListCache, meta: ListMeta) {
     renderFollowed();
 }
 
+// A random person from your own lists, picked once per popup open. Lists you
+// follow are left out, and so is your own account.
+let currentSelfHandle: string | undefined;
+let revisitPick: string | null = null;
+
+function ownListsOf(handle: string): string[] {
+    return (currentCache[handle] || []).filter((id) => id in currentMeta && !(id in currentFollowed));
+}
+
+function revisitPool(): string[] {
+    return Object.keys(currentCache).filter((handle) => handle !== currentSelfHandle && ownListsOf(handle).length > 0);
+}
+
+function pickRevisit(avoid?: string) {
+    const pool = revisitPool();
+    const choices = pool.length > 1 && avoid ? pool.filter((handle) => handle !== avoid) : pool;
+    revisitPick = choices.length ? choices[Math.floor(Math.random() * choices.length)] : null;
+}
+
+function renderRevisit(visible: boolean) {
+    if (visible && (!revisitPick || !revisitPool().includes(revisitPick))) pickRevisit();
+    show(revisitCard, visible && revisitPick !== null);
+    if (!visible || !revisitPick) return;
+    revisitHandle.textContent = `@${revisitPick}`;
+    revisitLists.textContent = ownListsOf(revisitPick).map((id) => currentMeta[id]).sort((a, b) => a.localeCompare(b)).join(', ');
+    revisitOpenBtn.title = `Open @${revisitPick} on X`;
+    revisitShuffleBtn.disabled = revisitPool().length < 2;
+}
+
+revisitShuffleBtn.addEventListener('click', () => {
+    pickRevisit(revisitPick ?? undefined);
+    renderRevisit(true);
+});
+
+revisitOpenBtn.addEventListener('click', () => {
+    if (!revisitPick) return;
+    void chrome.tabs.create({ url: `https://x.com/${encodeURIComponent(revisitPick)}` });
+    window.close();
+});
+
 listsSearch.addEventListener('input', () => {
     listFilter = listsSearch.value;
     renderLists(currentCache, currentMeta);
@@ -392,6 +437,7 @@ function render(
     peopleWord.textContent = people === 1 ? 'person' : 'people';
     listCount.textContent = lists ? `Across ${plural(lists, 'list')}` : 'No lists synced yet';
     renderLists(cache, meta);
+    renderRevisit(ready && lastSync !== undefined);
     lastSyncEl.textContent = lastSync ? `Last synced ${relativeTime(lastSync)}` : 'Never synced';
 
     renderSetup(queryIds, env);
@@ -473,13 +519,14 @@ function render(
 
 async function refresh() {
     const [stored, queryIds, hostAccess] = await Promise.all([
-        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker', 'listColors', 'followedLists']),
+        getLocal(['syncState', 'listCache', 'listMeta', 'lastSync', 'lastFullSync', 'needsFullSync', 'hookStatus', 'showUnlistedMarker', 'listColors', 'followedLists', 'selfHandle']),
         getStoredQueryIds(),
         hasHostAccess(),
     ]);
     unlistedToggle.checked = stored.showUnlistedMarker === true;
     currentColors = (stored.listColors || {}) as ListColors;
     currentFollowed = (stored.followedLists || {}) as FollowedLists;
+    currentSelfHandle = typeof stored.selfHandle === 'string' ? stored.selfHandle.toLowerCase() : undefined;
     render(
         stored.syncState as SyncState | undefined,
         (stored.listCache || {}) as ListCache,
