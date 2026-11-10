@@ -15,6 +15,6 @@ Read `README.md` for what this repo does and how to run it.
 ## Specs and tasks
 
 - Specs go in `docs/specs/` as `SPEC-<slug>.md`; plans, task lists, handoffs and run notes go in `docs/tasks/`; shipped or dropped work goes in `docs/archive/`. Create the folders when missing; nothing goes at the repo root.
-- When work ships or is dropped, `git mv` its spec and tasks to `docs/archive/` under the same names, add a line to `docs/archive/README.md` (file, what shipped or why it was dropped, month) and fix any path that cites them (`git grep <file name>`).
+- When work ships or is dropped, `git mv` its spec and every `docs/tasks/` file of the same work (`<slug>-*.md`: plans, run notes, QA notes, handoffs) to `docs/archive/` under the same names, add a line to `docs/archive/README.md` (file, what shipped or why it was dropped, month) and fix any path that cites them (`git grep <file name>`). A run note that cites the spec moves with it: do not only fix its path. Keep a file in `docs/tasks/` only while it holds an open follow-up.
 - Never edit an archived spec to match today's code; new work gets a new spec.
 - When `docs/specs/` or `docs/tasks/` holds something that looks finished or untouched for a month, list it and move it on my yes.
